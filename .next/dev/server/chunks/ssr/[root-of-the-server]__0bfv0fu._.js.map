@@ -1,0 +1,6 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 46, "column": 0}, "map": {"version":3,"sources":["file:///Users/mbp/Downloads/ai-insider/components/AuthProvider.tsx"],"sourcesContent":["\"use client\";\n\nimport { SessionProvider } from \"next-auth/react\";\nimport { ReactNode } from \"react\";\n\nexport default function AuthProvider({ children }: { children: ReactNode }) {\n  return <SessionProvider>{children}</SessionProvider>;\n}"],"names":["AuthProvider","children"],"mappings":";;;;;AAEA;AAFA;;;AAKe,SAASA,aAAa,EAAEC,QAAQ,EAA2B;IACxE,qBAAO,8OAAC,wJAAe;kBAAEA;;;;;;AAC3B"}}]
+}

@@ -1,0 +1,115 @@
+"use client";
+
+import { useEffect, useState, useCallback } from "react";
+import TopicWaypoint from "./TopicWaypoint";
+import RelatedRail from "./RelatedRail";
+import type { PathView } from "@/domain/types";
+
+interface PathRoadmapProps {
+  pathId: string;
+}
+
+export default function PathRoadmap({ pathId }: PathRoadmapProps) {
+  const [path, setPath] = useState<PathView | null>(null);
+  const [notFound, setNotFound] = useState(false);
+
+  const fetchPath = useCallback(async () => {
+    const res = await fetch(`/api/paths/${pathId}`);
+    if (res.status === 404) {
+      setNotFound(true);
+      return;
+    }
+    const json = await res.json();
+    setPath(json.data);
+  }, [pathId]);
+
+  useEffect(() => {
+    // Standard fetch-on-mount idiom: fetchPath is async and calls setState
+    // once data arrives, not synchronously within the effect body itself.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchPath();
+  }, [fetchPath]);
+
+  // While the path is still being assembled server-side, poll for updates.
+  useEffect(() => {
+    if (!path || path.status !== "GENERATING") return;
+    const interval = setInterval(fetchPath, 2000);
+    return () => clearInterval(interval);
+  }, [path, fetchPath]);
+
+  async function handleToggleWatched(videoId: string, watched: boolean) {
+    // Optimistic update
+    setPath((prev) =>
+      prev
+        ? {
+            ...prev,
+            topics: prev.topics.map((t) => ({
+              ...t,
+              videos: t.videos.map((v) => (v.id === videoId ? { ...v, watched } : v)),
+            })),
+          }
+        : prev
+    );
+    await fetch("/api/progress", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ videoId, watched }),
+    });
+  }
+
+  if (notFound) {
+    return (
+      <div className="flex-1 flex items-center justify-center px-6">
+        <p className="text-[var(--text-dim)]">This route doesn&apos;t exist. It may have been removed.</p>
+      </div>
+    );
+  }
+
+  if (!path) {
+    return (
+      <div className="flex-1 flex items-center justify-center px-6">
+        <p className="font-mono text-sm text-[var(--text-dim)] animate-pulse">Loading route…</p>
+      </div>
+    );
+  }
+
+  const totalVideos = path.topics.reduce((sum, t) => sum + t.videos.length, 0);
+  const watchedVideos = path.topics.reduce((sum, t) => sum + t.videos.filter((v) => v.watched).length, 0);
+  const pct = totalVideos > 0 ? Math.round((watchedVideos / totalVideos) * 100) : 0;
+
+  return (
+    <main className="flex-1 px-6 py-16">
+      <div className="max-w-2xl mx-auto">
+        <p className="font-mono text-xs tracking-widest uppercase text-[var(--route)] mb-3">
+          {path.status === "GENERATING" ? "Charting route…" : `${pct}% complete`}
+        </p>
+        <h1 className="font-display text-3xl font-medium mb-10">{path.title}</h1>
+
+        {path.status === "GENERATING" && (
+          <p className="font-mono text-sm text-[var(--text-dim)] animate-pulse mb-10">
+            Finding the best videos for each step — this takes a moment.
+          </p>
+        )}
+
+        {path.status === "FAILED" && (
+          <p className="text-sm text-red-400 mb-10">
+            Something went wrong charting this route. Try creating a new one.
+          </p>
+        )}
+
+        <div>
+          {path.topics.map((topic, i) => (
+            <TopicWaypoint
+              key={topic.id}
+              topic={topic}
+              isLast={i === path.topics.length - 1}
+              onToggleWatched={handleToggleWatched}
+            />
+          ))}
+        </div>
+
+        {path.status === "READY" && <RelatedRail field={path.title} />}
+      </div>
+    </main>
+  );
+}

@@ -1,0 +1,140 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// User model — supports both anonymous (cookie-based) and authenticated (OAuth) users.
+// Anonymous users have no email/account. When they sign in, the existing User row
+// is linked to an Account row and their progress is preserved.
+model User {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now())
+
+  // Auth fields (null for anonymous users)
+  email         String?   @unique
+  name          String?
+  image         String?
+  emailVerified DateTime?
+
+  // Relations
+  paths      LearningPath[]
+  progress   Progress[]
+  accounts   Account[]
+  sessions   Session[]
+}
+
+model LearningPath {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  prompt    String
+  title     String
+  status    PathStatus @default(GENERATING)
+  createdAt DateTime @default(now())
+
+  topics Topic[]
+
+  @@index([userId])
+}
+
+enum PathStatus {
+  GENERATING
+  READY
+  FAILED
+}
+
+model Topic {
+  id             String       @id @default(uuid())
+  learningPathId String
+  learningPath   LearningPath @relation(fields: [learningPathId], references: [id], onDelete: Cascade)
+  title          String
+  order          Int
+
+  topicVideos TopicVideo[]
+
+  @@index([learningPathId])
+}
+
+model Video {
+  id             String   @id @default(uuid())
+  youtubeVideoId String   @unique
+  title          String
+  channelTitle   String
+  thumbnailUrl   String
+  durationSec    Int
+  viewCount      BigInt
+  publishedAt    DateTime
+  cachedAt       DateTime @default(now())
+
+  topicVideos TopicVideo[]
+  progress    Progress[]
+}
+
+model TopicVideo {
+  id      String @id @default(uuid())
+  topicId String
+  topic   Topic  @relation(fields: [topicId], references: [id], onDelete: Cascade)
+  videoId String
+  video   Video  @relation(fields: [videoId], references: [id], onDelete: Restrict)
+  order   Int
+
+  @@unique([topicId, videoId])
+  @@index([topicId])
+  @@index([videoId])
+}
+
+model Progress {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  videoId   String
+  video     Video    @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  watched   Boolean  @default(false)
+  watchedAt DateTime?
+
+  @@unique([userId, videoId])
+  @@index([userId])
+}
+
+// NextAuth.js required models
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}

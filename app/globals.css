@@ -1,0 +1,30 @@
+@import "tailwindcss";
+/* @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500&display=swap'); */
+
+:root {
+  /* Trail/waypoint theme: a learning path is literally a route, so the visual
+     language borrows from topographic maps — not the cream/serif/terracotta
+     or near-black/acid-accent defaults. */
+  --ink: #10161A;         /* near-black, slight blue-green cast, like night terrain */
+  --paper: #F4F1E9;       /* keep for light surfaces (cards) only, not full bg */
+  --route: #E8A33D;       /* amber waypoint / progress line — the one accent */
+  --route-dim: #6B5530;   /* muted amber for unvisited route segments */
+  --sage: #7C9885;        /* secondary, muted green */
+  --ink-2: #1B242A;       /* card surface on dark bg */
+  --text: #EDEDE6;
+  --text-dim: #9AA3A0;
+}
+
+body {
+  background: var(--ink);
+  color: var(--text);
+  font-family: 'Inter', system-ui, sans-serif;
+}
+
+.font-display {
+  font-family: 'Space Grotesk', system-ui, sans-serif;
+}
+
+.font-mono {
+  font-family: 'IBM Plex Mono', monospace;
+}
