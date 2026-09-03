@@ -1,10 +1,10 @@
-import { cookies } from "next/headers";
 import { prisma } from "@/infrastructure/db/prisma";
 import { PrismaAdapter } from "@next-auth/prisma-adapter";
-import NextAuth from "next-auth";
 import type { NextAuthOptions } from "next-auth";
+import NextAuth from "next-auth";
 import type { Adapter } from "next-auth/adapters";
 import Google from "next-auth/providers/google";
+import { cookies } from "next/headers";
 
 const ANON_COOKIE_NAME = "ai_insider_uid";
 
@@ -14,6 +14,7 @@ export const authOptions: NextAuthOptions = {
     Google({
       clientId: process.env.GOOGLE_CLIENT_ID!,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+      allowDangerousEmailAccountLinking: true,
     }),
   ],
   session: {
@@ -34,7 +35,7 @@ export const authOptions: NextAuthOptions = {
     // not just the first, but is a no-op once the anon cookie is gone.
     async signIn({ user }) {
       try {
-        const cookieStore = cookies();
+        const cookieStore = await cookies();
         const anonUserId = cookieStore.get(ANON_COOKIE_NAME)?.value;
 
         if (!anonUserId || anonUserId === user.id) return;
