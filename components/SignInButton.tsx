@@ -2,35 +2,10 @@
 
 import { signIn } from "next-auth/react";
 
-function getCookie(name: string): string | null {
-  const match = document.cookie.match(new RegExp("(^| )" + name + "=([^;]+)"));
-  return match ? match[2] : null;
-}
-
 export default function SignInButton() {
-  const handleSignIn = async () => {
-    // Capture anonymous user ID before signing in
-    const anonUserId = getCookie("ai_insider_uid");
-
-    const result = await signIn("google", { callbackUrl: "/", redirect: false });
-
-    if (result?.ok && anonUserId) {
-      // Transfer anonymous data to the authenticated account
-      await fetch("/api/auth/migrate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ anonUserId }),
-      });
-      // Redirect after migration
-      window.location.href = "/";
-    } else if (result?.ok) {
-      window.location.href = "/";
-    }
-  };
-
   return (
     <button
-      onClick={handleSignIn}
+      onClick={() => signIn("google", { callbackUrl: "/" })}
       className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-white/15 text-[var(--text)] hover:border-white/30 hover:bg-white/5 transition text-sm"
     >
       <svg className="w-4 h-4" viewBox="0 0 24 24">
