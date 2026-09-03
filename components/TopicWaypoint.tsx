@@ -18,29 +18,11 @@ function formatDuration(sec: number): string {
 
 export default function TopicWaypoint({ topic, isLast, onToggleWatched }: TopicWaypointProps) {
   const [expanded, setExpanded] = useState(false);
-  const [activeVideo, setActiveVideo] = useState<PathView["topics"][0]["videos"][0] | null>(null);
   const watchedCount = topic.videos.filter((v) => v.watched).length;
   const complete = topic.videos.length > 0 && watchedCount === topic.videos.length;
 
   return (
     <div className="relative pl-14">
-      {/* Modal for video playback */}
-      {activeVideo && (
-        <div 
-          className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4"
-          onClick={() => setActiveVideo(null)}
-        >
-          <div className="w-full max-w-5xl">
-            <VideoEmbed youtubeVideoId={activeVideo.youtubeVideoId} title={activeVideo.title} />
-          </div>
-          <button 
-            className="absolute top-4 right-4 text-white text-3xl"
-            onClick={() => setActiveVideo(null)}
-          >
-            ×
-          </button>
-        </div>
-      )}
 
       {/* Trail line + waypoint marker */}
       {!isLast && (
