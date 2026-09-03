@@ -139,7 +139,31 @@ export async function generateSyllabus(prompt: string): Promise<Syllabus> {
   // Uses 1 of your 20 free daily requests, queues if quota is exhausted
   await geminiRateLimiter.acquire(1);
 
-  const result = await model.generateContent(prompt);
+  const maxRetries = 3;
+  let attempt = 0;
+  let result;
+
+  while (attempt < maxRetries) {
+    try {
+      result = await model.generateContent(prompt);
+      break; // Success, exit loop
+    } catch (error: any) {
+      attempt++;
+      if (error.status === 503 && attempt < maxRetries) {
+        const delay = Math.pow(2, attempt) * 1000; // Exponential backoff
+        console.warn(`Gemini API unavailable (503). Retrying in ${delay / 1000}s... (Attempt ${attempt}/${maxRetries})`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      } else {
+        throw error; // Re-throw other errors or if max retries reached
+      }
+    }
+  }
+
+  if (!result) {
+    // This should not be reached if the loop throws on final failure, but as a safeguard:
+    throw new Error("Syllabus generation failed after multiple retries.");
+  }
+
   let text = result.response.text().trim();
 
   // Strip markdown fences if present
