@@ -1,38 +1,15 @@
-import { authOptions } from "@/infrastructure/auth/auth";
-import { prisma } from "@/infrastructure/db/prisma";
+import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
-import { NextRequest, NextResponse } from "next/server";
+import { authOptions } from "@/infrastructure/auth/auth";
+import { getOrCreateUserId } from "@/infrastructure/auth/getOrCreateUserId";
 
-export async function POST(req: NextRequest) {
+export async function POST() {
   const session = await getServerSession(authOptions);
   const authUser = session?.user as { id: string } | undefined;
   if (!authUser?.id) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
 
-  const body = await req.json().catch(() => ({}));
-  const anonUserId = body.anonUserId;
-
-  if (!anonUserId || anonUserId === authUser.id) {
-    return NextResponse.json({ migrated: false, reason: "No anonymous user to migrate" });
-  }
-
-  const anonUser = await prisma.user.findUnique({ where: { id: anonUserId } });
-  if (!anonUser) {
-    return NextResponse.json({ migrated: false, reason: "Anonymous user not found" });
-  }
-
-  await prisma.$transaction([
-    prisma.learningPath.updateMany({
-      where: { userId: anonUserId },
-      data: { userId: authUser.id },
-    }),
-    prisma.progress.updateMany({
-      where: { userId: anonUserId },
-      data: { userId: authUser.id },
-    }),
-    prisma.user.delete({ where: { id: anonUserId } }),
-  ]);
-
+  await getOrCreateUserId();
   return NextResponse.json({ migrated: true });
 }

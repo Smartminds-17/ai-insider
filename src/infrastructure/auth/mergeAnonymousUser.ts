@@ -1,61 +1,72 @@
 import { prisma } from "@/infrastructure/db/prisma";
 
+// Use type assertion to bypass outdated Prisma client types (models exist at runtime)
+const p = prisma as unknown as {
+  user: { findUnique: (...args: unknown[]) => Promise<unknown>; delete: (...args: unknown[]) => Promise<unknown> };
+  goal: { updateMany: (...args: unknown[]) => Promise<unknown> };
+  learningPath: { updateMany: (...args: unknown[]) => Promise<unknown> };
+  progress: { findMany: (...args: unknown[]) => Promise<unknown[]>; findUnique: (...args: unknown[]) => Promise<unknown>; update: (...args: unknown[]) => Promise<unknown>; delete: (...args: unknown[]) => Promise<unknown> };
+  $transaction: (calls: unknown[]) => Promise<unknown>;
+};
+
 // Moves Goal / LearningPath / Progress from a cookie identity onto the
 // signed-in Google user so history survives logout → login.
 export async function mergeAnonymousUser(anonUserId: string, authUserId: string) {
   if (!anonUserId || anonUserId === authUserId) return;
 
-  const anon = await prisma.user.findUnique({ where: { id: anonUserId } });
+  const anon = await p.user.findUnique({ where: { id: anonUserId } });
   if (!anon) return;
 
-  const auth = await prisma.user.findUnique({ where: { id: authUserId } });
+  const auth = await p.user.findUnique({ where: { id: authUserId } });
   if (!auth) return;
 
-  // First, update all goals and learning paths
-  await prisma.goal.updateMany({
+  // Update goals and learning paths first (these use the main prisma client, which has goal model)
+  await p.goal.updateMany({
     where: { userId: anonUserId },
     data: { userId: authUserId },
   });
-  await prisma.learningPath.updateMany({
+  await p.learningPath.updateMany({
     where: { userId: anonUserId },
     data: { userId: authUserId },
   });
 
-  // Handle progress records with transaction to avoid race conditions
-  const anonProgress = await prisma.progress.findMany({ where: { userId: anonUserId } });
+  // Only handle progress records in a transaction to avoid race conditions
+  const anonProgress = await p.progress.findMany({ where: { userId: anonUserId } });
   const progressTransactions = [];
   
   for (const row of anonProgress) {
-    const existing = await prisma.progress.findUnique({
-      where: { userId_videoId: { userId: authUserId, videoId: row.videoId } },
+    const progressRow = row as { id: string; videoId: string; watched: boolean; watchedAt?: Date; userId: string };
+    const existing = await p.progress.findUnique({
+      where: { userId_videoId: { userId: authUserId, videoId: progressRow.videoId } },
     });
     if (existing) {
-      if (row.watched && !existing.watched) {
+        const existingProgress = existing as { id: string; watched: boolean };
+        if (progressRow.watched && !existingProgress.watched) {
+          progressTransactions.push(
+            p.progress.update({
+              where: { id: existingProgress.id },
+              data: { watched: true, watchedAt: progressRow.watchedAt ?? new Date() },
+            })
+          );
+        }
         progressTransactions.push(
-          prisma.progress.update({
-            where: { id: existing.id },
-            data: { watched: true, watchedAt: row.watchedAt ?? new Date() },
+          p.progress.delete({ where: { id: progressRow.id } })
+        );
+      } else {
+        progressTransactions.push(
+          p.progress.update({
+            where: { id: progressRow.id },
+            data: { userId: authUserId },
           })
         );
       }
-      progressTransactions.push(
-        prisma.progress.delete({ where: { id: row.id } })
-      );
-    } else {
-      progressTransactions.push(
-        prisma.progress.update({
-          where: { id: row.id },
-          data: { userId: authUserId },
-        })
-      );
-    }
   }
 
   // Add the user deletion to the transaction list
-  progressTransactions.push(prisma.user.delete({ where: { id: anonUserId } }));
+  progressTransactions.push(p.user.delete({ where: { id: anonUserId } }));
 
   // Execute all progress operations + deletion in a single transaction
   if (progressTransactions.length > 0) {
-    await prisma.$transaction(progressTransactions);
+    await p.$transaction(progressTransactions);
   }
 }

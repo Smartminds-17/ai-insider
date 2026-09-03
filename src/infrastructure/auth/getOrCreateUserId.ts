@@ -1,34 +1,57 @@
-import { cookies } from "next/headers";
+import { authOptions } from "@/infrastructure/auth/auth";
+import { mergeAnonymousUser } from "@/infrastructure/auth/mergeAnonymousUser";
 import { prisma } from "@/infrastructure/db/prisma";
 import { getServerSession } from "next-auth";
-import { authOptions } from "@/infrastructure/auth/auth";
+import { cookies } from "next/headers";
 
-const COOKIE_NAME = "ai_insider_uid";
+export const COOKIE_NAME = "ai_insider_uid";
+
+function cookieOptions() {
+  return {
+    httpOnly: true,
+    sameSite: "strict" as const,
+    path: "/",
+    maxAge: 30 * 24 * 60 * 60,
+    secure: process.env.NODE_ENV === "production",
+  };
+}
 
 // Returns the current user's ID — authenticated (via NextAuth) or anonymous (via cookie).
+// When both exist, anonymous goals/progress are merged onto the Google user.
 export async function getOrCreateUserId(): Promise<string> {
-  // 1. Check for authenticated session first
+  const cookieStore = await cookies();
+  const cookieId = cookieStore.get(COOKIE_NAME)?.value;
+
   const session = await getServerSession(authOptions);
   const authUser = session?.user as { id: string } | undefined;
+  
+  // Critical: If we have an authenticated user, they MUST have a valid session
   if (authUser?.id) {
+    // Only merge anonymous data if the cookie contains a DIFFERENT anonymous ID
+    // Never reuse a cookie ID from a previous authenticated user
+    if (cookieId && cookieId !== authUser.id) {
+      // Check if the cookie ID is actually an anonymous user (not another authenticated user)
+      const cookieUser = await prisma.user.findUnique({
+        where: { id: cookieId },
+        select: { email: true } // Only select email to check if it's an anonymous user (no email)
+      });
+      
+      // Only merge if it's a true anonymous user (no email, which all Google users have)
+      if (cookieUser && !cookieUser.email) {
+        await mergeAnonymousUser(cookieId, authUser.id);
+      }
+    }
+    // Always set the cookie to the current authenticated user's ID
+    cookieStore.set(COOKIE_NAME, authUser.id, cookieOptions());
     return authUser.id;
   }
 
-  // 2. Fall back to anonymous cookie identity
-  const cookieStore = await cookies();
-  const existing = cookieStore.get(COOKIE_NAME)?.value;
-
-  if (existing) {
-    const user = await prisma.user.findUnique({ where: { id: existing } });
+  if (cookieId) {
+    const user = await prisma.user.findUnique({ where: { id: cookieId } });
     if (user) return user.id;
   }
 
-  // 3. Create new anonymous user
   const newUser = await prisma.user.create({ data: {} });
-  cookieStore.set(COOKIE_NAME, newUser.id, {
-    httpOnly: true,
-    sameSite: "lax",
-    maxAge: 60 * 60 * 24 * 365,
-  });
+  cookieStore.set(COOKIE_NAME, newUser.id, cookieOptions());
   return newUser.id;
 }

@@ -7,80 +7,89 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// User model — supports both anonymous (cookie-based) and authenticated (OAuth) users.
-// Anonymous users have no email/account. When they sign in, the existing User row
-// is linked to an Account row and their progress is preserved.
 model User {
-  id        String   @id @default(uuid())
-  createdAt DateTime @default(now())
-
-  // Auth fields (null for anonymous users)
-  email         String?   @unique
-  name          String?
-  image         String?
+  id            String         @id @default(uuid())
+  createdAt     DateTime       @default(now())
+  email         String?        @unique
   emailVerified DateTime?
+  image         String?
+  name          String?
+  accounts      Account[]
+  goals         Goal[]
+  paths         LearningPath[]
+  progress      Progress[]
+  sessions      Session[]
+}
 
-  // Relations
-  paths      LearningPath[]
-  progress   Progress[]
-  accounts   Account[]
-  sessions   Session[]
+model Goal {
+  id        String         @id @default(uuid())
+  userId    String
+  prompt    String
+  title     String
+  status    GoalStatus     @default(ACTIVE)
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  paths     LearningPath[]
+
+  @@index([userId, createdAt])
+  @@index([userId, status])
 }
 
 model LearningPath {
-  id        String   @id @default(uuid())
+  id        String     @id @default(uuid())
   userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   prompt    String
   title     String
   status    PathStatus @default(GENERATING)
-  createdAt DateTime @default(now())
+  createdAt DateTime   @default(now())
+  goalId    String
+  outline   Json?
+  goal      Goal       @relation(fields: [goalId], references: [id], onDelete: Cascade)
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  topics    Topic[]
 
-  topics Topic[]
-
-  @@index([userId])
-}
-
-enum PathStatus {
-  GENERATING
-  READY
-  FAILED
+  @@index([userId, createdAt]) // Composite index for fetching user's paths in order
+  @@index([userId, status]) // Filter paths by status for a user
+  @@index([goalId, createdAt])
 }
 
 model Topic {
-  id             String       @id @default(uuid())
-  learningPathId String
-  learningPath   LearningPath @relation(fields: [learningPathId], references: [id], onDelete: Cascade)
-  title          String
-  order          Int
+  id              String       @id @default(uuid())
+  learningPathId  String
+  title           String
+  order           Int
+  selectedVideoId String?
+  learningPath    LearningPath @relation(fields: [learningPathId], references: [id], onDelete: Cascade)
+  topicVideos     TopicVideo[]
 
-  topicVideos TopicVideo[]
-
-  @@index([learningPathId])
+  @@index([learningPathId, order]) // Fetch topics in order for a path
+  @@index([selectedVideoId]) // Find all topics that use a specific video
 }
 
 model Video {
-  id             String   @id @default(uuid())
-  youtubeVideoId String   @unique
+  id             String       @id @default(uuid())
+  youtubeVideoId String       @unique
   title          String
   channelTitle   String
   thumbnailUrl   String
   durationSec    Int
   viewCount      BigInt
   publishedAt    DateTime
-  cachedAt       DateTime @default(now())
-
-  topicVideos TopicVideo[]
-  progress    Progress[]
+  cachedAt       DateTime     @default(now())
+  progress       Progress[]
+  topicVideos    TopicVideo[]
 }
 
 model TopicVideo {
-  id      String @id @default(uuid())
-  topicId String
-  topic   Topic  @relation(fields: [topicId], references: [id], onDelete: Cascade)
-  videoId String
-  video   Video  @relation(fields: [videoId], references: [id], onDelete: Restrict)
-  order   Int
+  id       String      @id @default(uuid())
+  topicId  String
+  videoId  String
+  order    Int
+  source   VideoSource @default(GENERATED)
+  selected Boolean     @default(false)
+  topic    Topic       @relation(fields: [topicId], references: [id], onDelete: Cascade)
+  video    Video       @relation(fields: [videoId], references: [id])
 
   @@unique([topicId, videoId])
   @@index([topicId])
@@ -88,34 +97,32 @@ model TopicVideo {
 }
 
 model Progress {
-  id        String   @id @default(uuid())
+  id        String    @id @default(uuid())
   userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   videoId   String
-  video     Video    @relation(fields: [videoId], references: [id], onDelete: Cascade)
-  watched   Boolean  @default(false)
+  watched   Boolean   @default(false)
   watchedAt DateTime?
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  video     Video     @relation(fields: [videoId], references: [id], onDelete: Cascade)
 
   @@unique([userId, videoId])
   @@index([userId])
 }
 
-// NextAuth.js required models
 model Account {
   id                String  @id @default(cuid())
   userId            String
   type              String
   provider          String
   providerAccountId String
-  refresh_token     String? @db.Text
-  access_token      String? @db.Text
+  refresh_token     String?
+  access_token      String?
   expires_at        Int?
   token_type        String?
   scope             String?
-  id_token          String? @db.Text
+  id_token          String?
   session_state     String?
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([provider, providerAccountId])
   @@index([userId])
@@ -137,4 +144,21 @@ model VerificationToken {
   expires    DateTime
 
   @@unique([identifier, token])
+}
+
+enum GoalStatus {
+  ACTIVE
+  COMPLETED
+  ARCHIVED
+}
+
+enum PathStatus {
+  GENERATING
+  READY
+  FAILED
+}
+
+enum VideoSource {
+  GENERATED
+  INSPIRATION
 }
