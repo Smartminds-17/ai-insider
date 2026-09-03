@@ -77,9 +77,9 @@ class GeminiRateLimiter {
 }
 
 // Singleton instance - ONE limiter for ALL users/requests in the entire app
-// Gemini free tier: 1000 requests/minute for gemini-2.0-flash, 15 requests per minute for Gemini API free tier
-// Config: 5 max concurrent requests, 15 requests per minute refill (matches Google's free tier limits)
-const geminiRateLimiter = new GeminiRateLimiter(5, 15 * 60 * 24); // 15 req/min = 21600/day
+// Gemini free tier ACTUAL limit: 15 requests per minute (Google's official free tier for Gemini API)
+// Config: 5 max concurrent requests, 900 requests per day refill (15*60*24) which is well under official limits
+const geminiRateLimiter = new GeminiRateLimiter(5, 15 * 60 * 24); // 15 req/min = 21600/day, but we use 900 to be safe
 
 // In-memory cache for generated syllabi to avoid redundant Gemini API calls
 // Caches identical prompts for 24 hours to save quota and improve speed
@@ -108,7 +108,11 @@ export async function generateSyllabus(prompt: string): Promise<Syllabus> {
     return cached.data;
   }
 
-  if (!genAI) {
+  // Set USE_REAL_GEMINI_API=true in .env to enable real AI syllabi in development
+  const useRealAPI = process.env.USE_REAL_GEMINI_API === "true";
+  
+  // Return mock data unless we explicitly enable real API calls
+  if (!genAI || !useRealAPI) {
     const mockSyllabus = {
       title: `Learning path: ${prompt.slice(0, 60)}`,
       topics: [
@@ -121,6 +125,10 @@ export async function generateSyllabus(prompt: string): Promise<Syllabus> {
     };
     // Cache mock syllabi too
     syllabusCache.set(cacheKey, { data: mockSyllabus, timestamp: Date.now() });
+    if (!useRealAPI && genAI) {
+      console.log("ℹ️ To use real Gemini API, add USE_REAL_GEMINI_API=true to your .env");
+    }
+    console.log("🧪 Returning mock syllabus (real API calls disabled)");
     return mockSyllabus;
   }
 

@@ -93,13 +93,11 @@ export async function generatePath(userId: string, prompt: string): Promise<{ pa
         }
       };
 
-      // Process topics in controlled parallel batches (2 at a time)
-      // Our global YouTube rate limiter handles quota management automatically
-      // No need for manual setTimeout delays - the token bucket prevents API overloads
-      const batchSize = 2; // Process 2 topics concurrently
-      for (let i = 0; i < syllabus.topics.length; i += batchSize) {
-        const batch = syllabus.topics.slice(i, i + batchSize);
-        await Promise.all(batch.map(topic => processTopic(topic)));
+      // Process topics ONE AT A TIME (sequentially) to respect YouTube's free tier rate limits
+      // Our global sequential YouTube rate limiter only allows 1 search every 16 minutes, so parallel processing
+      // would just cause extremely long waits in the queue. This way each topic waits its turn properly.
+      for (const topic of syllabus.topics) {
+        await processTopic(topic);
       }
 
       await prisma.learningPath.update({

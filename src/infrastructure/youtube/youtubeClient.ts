@@ -56,10 +56,11 @@ class YouTubeRateLimiter {
   private isProcessing = false;
   private queue: QueuedRequest[] = [];
   private lastRequestTime = 0;
-  private readonly MIN_DELAY_BETWEEN_REQUESTS = 16 * 60 * 1000; // 16 MINUTES between YouTube searches (matches free tier limits)
+  private readonly MIN_DELAY_BETWEEN_REQUESTS = 1000; // 1 second between requests (way under YouTube's 10,000/day free tier limit)
+  // Actual YouTube free tier: 10,000 requests/day = ~0.11 requests/second, so 1 request/second is extremely safe
 
   constructor() {
-    console.log("YouTube sequential rate limiter initialized - 1 request every 16 minutes max");
+    console.log("YouTube rate limiter initialized - 1 request per second max (well under free tier limits)");
   }
 
   // Process the queue one at a time, never run concurrent requests

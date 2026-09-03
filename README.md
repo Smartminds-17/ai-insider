@@ -75,12 +75,14 @@ We've implemented critical fixes to resolve concurrency, rate-limit, and perform
 
 ### 1. YouTube API Concurrency & Rate Limiting (Fixed)
 - **Problem**: Multiple concurrent YouTube API requests were hitting free-tier limits, causing constant `Rate limiter timeout (4000ms)` errors and mock data fallback.
-- **Solution**: Replaced complex token-bucket logic with a **sequential rate limiter** (`src/infrastructure/youtube/youtubeClient.ts`) that strictly enforces **1 request every 16 minutes** (matches YouTube free tier's ~1 search/min quota).
+- **Solution**: Replaced complex token-bucket logic with a **sequential rate limiter** (`src/infrastructure/youtube/youtubeClient.ts`) that strictly enforces **1 request every 16 minutes** (matches YouTube free tier's strict quota of ~100 requests/day).
+- **Important Free Tier Note**: YouTube's free tier allows ~100 searches/day total. For a syllabus with 5 topics, this means total processing time is ~80 minutes. If you're developing locally, use mock data by omitting `YOUTUBE_API_KEY` from `.env` to avoid real API calls.
 - **Details**:
   - 25-minute timeout (up from 4s) to eliminate false timeouts
   - In-memory queue processes only one request at a time
   - Console logs display exact wait time: `YouTube quota: waiting 14 minutes for next search...`
   - Never sends concurrent requests - completely eliminates 429 rate limit errors
+  - Updated topic processing to be sequential in `generatePath.ts` to avoid queue pileups
 
 ### 2. Auth Callback Speed Fix (3.7s → <200ms)
 - **Problem**: Anonymous user migration was running synchronously in the auth callback, causing 5.8s response times.
@@ -99,8 +101,8 @@ We've implemented critical fixes to resolve concurrency, rate-limit, and perform
 
 - **Editable syllabus**: insert a review/edit screen between syllabus
   generation and video sourcing in `src/application/generatePath.ts`.
-- **Real accounts**: replace `src/infrastructure/auth/getOrCreateUserId.ts`
-  with real auth; the `User` model already exists in the schema.
 - **Monetization**: gate `generatePath` calls per month on the free tier —
   the `LearningPath` table already has `createdAt` and `userId` to count
   against.
+- **Additional OAuth providers**: add GitHub, Discord, or email/password auth to NextAuth
+  in `src/infrastructure/auth/auth.ts` (the NextAuth setup is already production-ready).
