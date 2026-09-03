@@ -34,7 +34,7 @@ export const authOptions: NextAuthOptions = {
     // not just the first, but is a no-op once the anon cookie is gone.
     async signIn({ user }) {
       try {
-        const cookieStore = await cookies();
+        const cookieStore = cookies();
         const anonUserId = cookieStore.get(ANON_COOKIE_NAME)?.value;
 
         if (!anonUserId || anonUserId === user.id) return;
