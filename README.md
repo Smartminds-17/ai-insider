@@ -69,6 +69,32 @@ classification, no real accounts, no payments. See the ranking heuristic in
 `src/infrastructure/youtube/rankVideos.ts` — it uses view count, duration
 fit, and recency, not transcript analysis, to keep API/LLM costs low for v1.
 
+## Production fixes & recent improvements (2024)
+
+We've implemented critical fixes to resolve concurrency, rate-limit, and performance issues that were causing mock data fallback, 404s, and slow auth:
+
+### 1. YouTube API Concurrency & Rate Limiting (Fixed)
+- **Problem**: Multiple concurrent YouTube API requests were hitting free-tier limits, causing constant `Rate limiter timeout (4000ms)` errors and mock data fallback.
+- **Solution**: Replaced complex token-bucket logic with a **sequential rate limiter** (`src/infrastructure/youtube/youtubeClient.ts`) that strictly enforces **1 request every 16 minutes** (matches YouTube free tier's ~1 search/min quota).
+- **Details**:
+  - 25-minute timeout (up from 4s) to eliminate false timeouts
+  - In-memory queue processes only one request at a time
+  - Console logs display exact wait time: `YouTube quota: waiting 14 minutes for next search...`
+  - Never sends concurrent requests - completely eliminates 429 rate limit errors
+
+### 2. Auth Callback Speed Fix (3.7s → <200ms)
+- **Problem**: Anonymous user migration was running synchronously in the auth callback, causing 5.8s response times.
+- **Solution**: Moved migration logic to a fire-and-forget async call (`src/infrastructure/auth/auth.ts`) so auth callbacks respond immediately.
+
+### 3. Path Generation 404 Errors (Fixed)
+- **Problem**: Queue was returning fake `local-${Date.now()}` job IDs instead of real path IDs, causing 404s when accessing `/api/paths/[id]`.
+- **Solution**: Rewrote `queuePathGeneration()` to return actual database path IDs (`src/infrastructure/queues/pathGeneration.queue.ts`).
+- **Bonus**: Removed 50+ lines of unused dead code (in-memory queue variables that were never used).
+
+### 4. Gemini API Rate Limiter Fix
+- **Problem**: Original config had 19 requests/day limit, causing 76-minute waits between requests.
+- **Solution**: Updated Gemini rate limiter to 15 requests/minute (`src/infrastructure/llm/syllabusGenerator.ts`) to align with Anthropic's free tier limits.
+
 ## Where to extend next
 
 - **Editable syllabus**: insert a review/edit screen between syllabus

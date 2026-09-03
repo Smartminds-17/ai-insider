@@ -77,10 +77,9 @@ class GeminiRateLimiter {
 }
 
 // Singleton instance - ONE limiter for ALL users/requests in the entire app
-// Gemini free tier: 20 generateContent requests/day for gemini-3.5-flash
-// Config: 1 max token (only 1 request can run at a time), 19 requests/day refill
-// This uses 1 token per path generation, keeping you safely under 20/day
-const geminiRateLimiter = new GeminiRateLimiter(1, 19);
+// Gemini free tier: 1000 requests/minute for gemini-2.0-flash, 15 requests per minute for Gemini API free tier
+// Config: 5 max concurrent requests, 15 requests per minute refill (matches Google's free tier limits)
+const geminiRateLimiter = new GeminiRateLimiter(5, 15 * 60 * 24); // 15 req/min = 21600/day
 
 // In-memory cache for generated syllabi to avoid redundant Gemini API calls
 // Caches identical prompts for 24 hours to save quota and improve speed

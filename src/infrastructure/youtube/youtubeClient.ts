@@ -42,103 +42,80 @@ async function fetchWithRetry(url: string, retries = 5, baseDelay = 2000): Promi
 }
 
 // ==========================================
-// GLOBAL TOKEN BUCKET RATE LIMITER (for ALL concurrent users)
-// Manages YouTube API quota across every user generating a learning path simultaneously
-// Prevents "Too many requests" errors even with multiple parallel users
+// SIMPLIFIED SEQUENTIAL RATE LIMITER for YouTube FREE TIER
+// Since free tier only allows ~1 search every 15 minutes, we just run ONE request at a time
+// No complex token bucket - prevents all concurrency issues by queuing everything
 // ==========================================
 type QueuedRequest = {
   resolve: () => void;
-  reject: () => void;
-  unitsNeeded: number;
+  reject: (error: Error) => void;
   addedAt: number;
 };
 
 class YouTubeRateLimiter {
-  private availableTokens: number;
-  private maxTokens: number;
-  private refillRate: number; // tokens per second
-  private lastRefillTimestamp: number;
+  private isProcessing = false;
   private queue: QueuedRequest[] = [];
-  private processing = false;
+  private lastRequestTime = 0;
+  private readonly MIN_DELAY_BETWEEN_REQUESTS = 16 * 60 * 1000; // 16 MINUTES between YouTube searches (matches free tier limits)
 
-  constructor(maxTokens: number, refillRatePerMinute: number) {
-    this.maxTokens = maxTokens;
-    this.availableTokens = maxTokens;
-    this.refillRate = refillRatePerMinute / 60; // convert to per second
-    this.lastRefillTimestamp = Date.now();
-    console.log(`YouTube rate limiter: ${maxTokens} max tokens, ${refillRatePerMinute}/min refill`);
+  constructor() {
+    console.log("YouTube sequential rate limiter initialized - 1 request every 16 minutes max");
   }
 
-  private refill() {
-    const now = Date.now();
-    const timePassed = (now - this.lastRefillTimestamp) / 1000; // seconds
-    const tokensToAdd = timePassed * this.refillRate;
-    this.availableTokens = Math.min(this.maxTokens, this.availableTokens + tokensToAdd);
-    this.lastRefillTimestamp = now;
-  }
-
-  private processQueue() {
-    if (this.processing || this.queue.length === 0) return;
-    this.processing = true;
-    this.refill();
-
-    // First clean up any stale requests that have been waiting >4s
-    const now = Date.now();
-    const stale = this.queue.filter(req => now - req.addedAt > 4000);
-    stale.forEach(req => {
-      req.reject();
-      const index = this.queue.findIndex(r => r === req);
-      if (index !== -1) this.queue.splice(index, 1);
-    });
+  // Process the queue one at a time, never run concurrent requests
+  private async processQueue() {
+    if (this.isProcessing || this.queue.length === 0) return;
+    this.isProcessing = true;
 
     while (this.queue.length > 0) {
-      const next = this.queue[0];
-      if (this.availableTokens >= next.unitsNeeded) {
-        this.availableTokens -= next.unitsNeeded;
-        this.queue.shift();
+      const now = Date.now();
+      const timeSinceLastRequest = now - this.lastRequestTime;
+      
+      // If we need to wait before processing next, wait and then continue
+      if (timeSinceLastRequest < this.MIN_DELAY_BETWEEN_REQUESTS) {
+        const waitTime = this.MIN_DELAY_BETWEEN_REQUESTS - timeSinceLastRequest;
+        console.log(`YouTube quota: waiting ${Math.round(waitTime/1000/60)} minutes for next search...`);
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+      }
+
+      // Process the next request
+      const next = this.queue.shift();
+      if (next) {
+        this.lastRequestTime = Date.now();
         next.resolve();
-      } else {
-        // Wait for tokens to refill before processing next
-        const waitTime = Math.ceil((next.unitsNeeded - this.availableTokens) / this.refillRate * 1000);
-        setTimeout(() => {
-          this.processing = false;
-          this.processQueue();
-        }, waitTime);
-        return;
       }
     }
-    this.processing = false;
+
+    this.isProcessing = false;
   }
 
-  // Wait until we have enough tokens to execute the API request
-  async acquire(unitsNeeded: number): Promise<void> {
-    // Add timeout to prevent hanging requests that cause Vercel 5s timeouts
+  // Wait for your turn in the queue
+  async acquire(): Promise<void> {
     return new Promise((resolve, reject) => {
-      this.queue.push({ 
-        resolve, 
-        reject, 
-        unitsNeeded, 
-        addedAt: Date.now() 
+      // Add to queue
+      this.queue.push({
+        resolve,
+        reject,
+        addedAt: Date.now()
       });
+
+      // Start processing if not already
       this.processQueue();
-      
-      // Fail fast before Vercel's 5s limit
+
+      // 25 minute timeout - way more than enough for free tier
       setTimeout(() => {
         const index = this.queue.findIndex(req => req.resolve === resolve);
         if (index !== -1) {
           this.queue.splice(index, 1);
-          reject(new Error("Rate limiter timeout"));
+          reject(new Error("Rate limiter timeout (waited 25 minutes for YouTube quota)"));
         }
-      }, 4000);
+      }, 25 * 60 * 1000);
     });
   }
 }
 
-// Singleton instance - ONE limiter for ALL users/requests in the entire app
-// YouTube API unit costs: search.list=100 units, videos.list=1 unit → 101 units/topic
-// Config: 500 max tokens (allows 4-5 concurrent topics for bursts), 606 units/minute (6 topics/min across all users)
-// This keeps us well under YouTube's default 10,000 units/day quota (6*101*60*24 = 872,640 units/day)
-const youtubeRateLimiter = new YouTubeRateLimiter(500, 606);
+// Singleton instance - runs ONLY ONE YouTube search at a time, 16 minutes apart (matches free tier)
+const youtubeRateLimiter = new YouTubeRateLimiter();
 
 // List of real, public YouTube video IDs that work reliably for embedding
 // These are always available and won't cause playback errors
@@ -199,11 +176,10 @@ export async function searchVideosForTopic(
   }
 
   // search.list costs 100 units, videos.list (details) costs 1 unit — 101 total.
-  // Block here until the global token bucket has room, so we throttle proactively
-  // instead of only reacting to 429s after quota is already blown.
+  // Block here until the global sequential limiter has room, so we throttle proactively
   try {
     // Wait for rate limiter with timeout
-    await youtubeRateLimiter.acquire(101);
+    await youtubeRateLimiter.acquire();
     
     const searchUrl = new URL(`${YOUTUBE_API_BASE}/search`);
     searchUrl.searchParams.set("part", "snippet");
