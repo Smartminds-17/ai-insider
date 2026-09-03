@@ -47,35 +47,47 @@ export async function generatePath(userId: string, prompt: string): Promise<{ pa
 
         let firstVideoId: string | null = null;
 
-        // Process videos for this topic sequentially (to maintain order)
-        for (let i = 0; i < ranked.length; i++) {
-          const v = ranked[i];
+        // Create all video records in parallel first (to avoid duplicates)
+        const videos = await Promise.all(
+          ranked.map((v) =>
+            prisma.video.upsert({
+              where: { youtubeVideoId: v.youtubeVideoId },
+              update: {
+                title: v.title,
+                channelTitle: v.channelTitle,
+                thumbnailUrl: v.thumbnailUrl,
+                durationSec: v.durationSec,
+                viewCount: v.viewCount,
+                publishedAt: new Date(v.publishedAt),
+              },
+              create: {
+                youtubeVideoId: v.youtubeVideoId,
+                title: v.title,
+                channelTitle: v.channelTitle,
+                thumbnailUrl: v.thumbnailUrl,
+                durationSec: v.durationSec,
+                viewCount: v.viewCount,
+                publishedAt: new Date(v.publishedAt),
+              },
+            })
+          )
+        );
 
-          const video = await prisma.video.upsert({
-            where: { youtubeVideoId: v.youtubeVideoId },
-            update: {
-              title: v.title,
-              channelTitle: v.channelTitle,
-              thumbnailUrl: v.thumbnailUrl,
-              durationSec: v.durationSec,
-              viewCount: v.viewCount,
-              publishedAt: new Date(v.publishedAt),
-            },
-            create: {
-              youtubeVideoId: v.youtubeVideoId,
-              title: v.title,
-              channelTitle: v.channelTitle,
-              thumbnailUrl: v.thumbnailUrl,
-              durationSec: v.durationSec,
-              viewCount: v.viewCount,
-              publishedAt: new Date(v.publishedAt),
-            },
-          });
-
+        // Process topic-video associations sequentially to maintain order
+        for (let i = 0; i < videos.length; i++) {
+          const video = videos[i];
           if (i === 0) firstVideoId = video.id;
 
-          await prisma.topicVideo.create({
-            data: {
+          // Use upsert to avoid unique constraint violations if the same video is reused for multiple topics
+          await prisma.topicVideo.upsert({
+            where: {
+              topicId_videoId: {
+                topicId: createdTopic.id,
+                videoId: video.id,
+              },
+            },
+            update: {}, // If it exists, do nothing
+            create: {
               topicId: createdTopic.id,
               videoId: video.id,
               order: i,

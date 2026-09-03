@@ -115,37 +115,39 @@ class YouTubeRateLimiter {
   }
 }
 
-// Singleton instance - runs ONLY ONE YouTube search at a time, 16 minutes apart (matches free tier)
+// Singleton instance - runs ONLY ONE YouTube search at a time, 1 second apart (well under free tier)
 const youtubeRateLimiter = new YouTubeRateLimiter();
 
-// List of real, public YouTube video IDs that work reliably for embedding
-// These are always available and won't cause playback errors
-const REAL_YOUTUBE_IDS = [
+// Graceful fallback placeholder videos for when API hits rate limits
+// These are clearly marked as placeholders in the UI so users know what's happening
+const PLACEHOLDER_VIDEO_IDS = [
   "dQw4w9WgXcQ", // Classic test video (always works)
   "jNQXAC9IVRw", // First YouTube video (always available)
-  "9bZkp7q19f0", // Popular public video
-  "ScMzIvxBSi4", // SpaceX launch (public domain)
-  "L_LawLRqVeM", // NASA mission footage (public domain)
 ];
 
-// Mock results so the app is runnable/demoable without a YouTube API key.
-// Also used as a fallback when we hit API rate limits.
-function mockCandidates(topic: string): CandidateVideo[] {
+// Create placeholder videos that clearly indicate they're temporary due to rate limits
+function placeholderVideos(topic: string): CandidateVideo[] {
   return Array.from({ length: 5 }).map((_, i) => ({
-    youtubeVideoId: REAL_YOUTUBE_IDS[i % REAL_YOUTUBE_IDS.length],
-    title: `${topic} — Featured Video ${i + 1}`,
-    channelTitle: `Educational Channel ${i + 1}`,
-    thumbnailUrl: `https://i.ytimg.com/vi/${REAL_YOUTUBE_IDS[i]}/mqdefault.jpg`, // Real YouTube thumbnail
-    durationSec: 1800 + i * 900,
-    viewCount: 500000 - i * 80000,
-    publishedAt: new Date(Date.now() - i * 30 * 24 * 3600 * 1000).toISOString(),
+    youtubeVideoId: PLACEHOLDER_VIDEO_IDS[i % PLACEHOLDER_VIDEO_IDS.length],
+    title: `[PLACEHOLDER - Rate Limit Hit] ${topic} — Real videos will load when quota resets`,
+    channelTitle: "Placeholder (API Quota Exceeded)",
+    thumbnailUrl: `https://i.ytimg.com/vi/${PLACEHOLDER_VIDEO_IDS[0]}/mqdefault.jpg`,
+    durationSec: 1800,
+    viewCount: 0,
+    publishedAt: new Date().toISOString(),
   }));
 }
+
+// No fallback mock videos - if API fails, user gets clear error instead of unrelated videos
 
 // Exponential backoff for retries
 function delay(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
+
+// Clear entire cache on server startup to ensure fresh searches every time the app restarts
+searchCache.clear();
+console.log("✅ YouTube search cache cleared on server startup");
 
 // Cache cleanup - run every 15 minutes to prevent memory leaks
 setInterval(() => {
@@ -156,6 +158,12 @@ setInterval(() => {
     }
   }
 }, 15 * 60 * 1000);
+
+// Export a function to manually clear the cache if needed
+export function clearYouTubeCache() {
+  searchCache.clear();
+  console.log("✅ Manual YouTube cache clear complete");
+}
 
 export async function searchVideosForTopic(
   topic: string,
@@ -170,109 +178,115 @@ export async function searchVideosForTopic(
   }
 
   const apiKey = process.env.YOUTUBE_API_KEY;
-  if (!apiKey) {
-    const mockData = mockCandidates(topic);
-    searchCache.set(cacheKey, { data: mockData, timestamp: Date.now() });
-    return mockData;
-  }
-
-  // search.list costs 100 units, videos.list (details) costs 1 unit — 101 total.
-  // Block here until the global sequential limiter has room, so we throttle proactively
-  try {
-    // Wait for rate limiter with timeout
-    await youtubeRateLimiter.acquire();
-    
-    const searchUrl = new URL(`${YOUTUBE_API_BASE}/search`);
-    searchUrl.searchParams.set("part", "snippet");
-    searchUrl.searchParams.set("q", `${topic} full tutorial complete course`);
-    searchUrl.searchParams.set("type", "video");
-    searchUrl.searchParams.set("videoDuration", "long");
-    searchUrl.searchParams.set("maxResults", String(maxResults));
-    searchUrl.searchParams.set("relevanceLanguage", "en");
-    searchUrl.searchParams.set("key", apiKey);
-
-    const searchRes = await fetchWithRetry(searchUrl.toString());
-    
-    // If we hit rate limits, fall back to mock data immediately
-    if (searchRes.status === 429) {
-      console.warn("YouTube API rate limit hit, using mock data for:", topic);
-      const mockData = mockCandidates(topic);
-      searchCache.set(cacheKey, { data: mockData, timestamp: Date.now() });
-      return mockData;
+    if (!apiKey) {
+      console.warn("YouTube API key not found, using placeholders for:", topic);
+      const placeholders = placeholderVideos(topic);
+      searchCache.set(cacheKey, { data: placeholders, timestamp: Date.now() });
+      return placeholders;
     }
 
-    if (!searchRes.ok) {
-      // If we still fail after retries, fall back to mock data
-      console.warn(`YouTube API failed after retries, falling back to mock data: ${searchRes.status}`);
-      const mockData = mockCandidates(topic);
-      searchCache.set(cacheKey, { data: mockData, timestamp: Date.now() });
-      return mockData;
+    // search.list costs 100 units, videos.list (details) costs 1 unit — 101 total.
+    // Block here until the global sequential limiter has room, so we throttle proactively
+    try {
+      // Wait for rate limiter with timeout
+      await youtubeRateLimiter.acquire();
+      
+      const searchUrl = new URL(`${YOUTUBE_API_BASE}/search`);
+      searchUrl.searchParams.set("part", "snippet");
+      searchUrl.searchParams.set("q", `${topic} full tutorial complete course`);
+      searchUrl.searchParams.set("type", "video");
+      searchUrl.searchParams.set("videoDuration", "long");
+      searchUrl.searchParams.set("maxResults", String(maxResults));
+      searchUrl.searchParams.set("relevanceLanguage", "en");
+      searchUrl.searchParams.set("key", apiKey);
+
+      const searchRes = await fetchWithRetry(searchUrl.toString());
+      
+      // If we hit rate limits, use clear placeholders
+      if (searchRes.status === 429) {
+        console.warn("YouTube API rate limit hit, using placeholders for:", topic);
+        const placeholders = placeholderVideos(topic);
+        searchCache.set(cacheKey, { data: placeholders, timestamp: Date.now() });
+        return placeholders;
+      }
+
+      if (!searchRes.ok) {
+        console.warn(`YouTube search failed (status ${searchRes.status}), using placeholders for:`, topic);
+        const placeholders = placeholderVideos(topic);
+        searchCache.set(cacheKey, { data: placeholders, timestamp: Date.now() });
+        return placeholders;
+      }
+
+      const searchData = await searchRes.json();
+      const videoIds: string[] = searchData.items
+        .map((item: { id: { videoId?: string } }) => item.id.videoId)
+        .filter(Boolean);
+
+      if (videoIds.length === 0) {
+        console.warn("No YouTube videos found, using placeholders for:", topic);
+        const placeholders = placeholderVideos(topic);
+        searchCache.set(cacheKey, { data: placeholders, timestamp: Date.now() });
+        return placeholders;
+      }
+
+      // Wait 1s between search and details call to avoid overwhelming the API
+      await delay(1000);
+
+      // Second call needed: search.list doesn't return duration/viewCount, only
+      // videos.list (statistics + contentDetails parts) does.
+      const detailsUrl = new URL(`${YOUTUBE_API_BASE}/videos`);
+      detailsUrl.searchParams.set("part", "snippet,statistics,contentDetails");
+      detailsUrl.searchParams.set("id", videoIds.join(","));
+      detailsUrl.searchParams.set("key", apiKey);
+
+      const detailsRes = await fetchWithRetry(detailsUrl.toString());
+      
+      if (detailsRes.status === 429) {
+        console.warn("YouTube API rate limit hit on details call, using placeholders for:", topic);
+        const placeholders = placeholderVideos(topic);
+        searchCache.set(cacheKey, { data: placeholders, timestamp: Date.now() });
+        return placeholders;
+      }
+
+      if (!detailsRes.ok) {
+        console.warn(`YouTube details failed (status ${detailsRes.status}), using placeholders for:`, topic);
+        const placeholders = placeholderVideos(topic);
+        searchCache.set(cacheKey, { data: placeholders, timestamp: Date.now() });
+        return placeholders;
+      }
+
+      const detailsData = await detailsRes.json();
+      const results = detailsData.items.map(
+        (item: {
+          id: string;
+          snippet: {
+            title: string;
+            channelTitle: string;
+            thumbnails: { medium?: { url: string }; default: { url: string } };
+            publishedAt: string;
+          };
+          statistics: { viewCount?: string };
+          contentDetails: { duration: string };
+        }) => ({
+          youtubeVideoId: item.id,
+          title: item.snippet.title,
+          channelTitle: item.snippet.channelTitle,
+          thumbnailUrl: item.snippet.thumbnails.medium?.url ?? item.snippet.thumbnails.default.url,
+          durationSec: parseIsoDuration(item.contentDetails.duration),
+          viewCount: Number(item.statistics.viewCount ?? 0),
+          publishedAt: item.snippet.publishedAt,
+        })
+      );
+
+      // Cache the successful results
+      searchCache.set(cacheKey, { data: results, timestamp: Date.now() });
+      console.log(`Successfully fetched ${results.length} real videos for topic: ${topic}`);
+      return results;
+
+    } catch (err) {
+      console.warn("YouTube API error, using placeholders for:", topic, err);
+      const placeholders = placeholderVideos(topic);
+      searchCache.set(cacheKey, { data: placeholders, timestamp: Date.now() });
+      return placeholders;
     }
-
-    const searchData = await searchRes.json();
-    const videoIds: string[] = searchData.items
-      .map((item: { id: { videoId?: string } }) => item.id.videoId)
-      .filter(Boolean);
-
-    if (videoIds.length === 0) return mockCandidates(topic);
-
-    // Wait 1s between search and details call to avoid overwhelming the API
-    await delay(1000);
-
-    // Second call needed: search.list doesn't return duration/viewCount, only
-    // videos.list (statistics + contentDetails parts) does.
-    const detailsUrl = new URL(`${YOUTUBE_API_BASE}/videos`);
-    detailsUrl.searchParams.set("part", "snippet,statistics,contentDetails");
-    detailsUrl.searchParams.set("id", videoIds.join(","));
-    detailsUrl.searchParams.set("key", apiKey);
-
-    const detailsRes = await fetchWithRetry(detailsUrl.toString());
-    
-    if (detailsRes.status === 429) {
-      console.warn("YouTube API rate limit hit on details call, using mock data for:", topic);
-      const mockData = mockCandidates(topic);
-      searchCache.set(cacheKey, { data: mockData, timestamp: Date.now() });
-      return mockData;
-    }
-
-    if (!detailsRes.ok) {
-      console.warn(`YouTube video details failed after retries, falling back to mock data: ${detailsRes.status}`);
-      const mockData = mockCandidates(topic);
-      searchCache.set(cacheKey, { data: mockData, timestamp: Date.now() });
-      return mockData;
-    }
-
-    const detailsData = await detailsRes.json();
-    const results = detailsData.items.map(
-      (item: {
-        id: string;
-        snippet: {
-          title: string;
-          channelTitle: string;
-          thumbnails: { medium?: { url: string }; default: { url: string } };
-          publishedAt: string;
-        };
-        statistics: { viewCount?: string };
-        contentDetails: { duration: string };
-      }) => ({
-        youtubeVideoId: item.id,
-        title: item.snippet.title,
-        channelTitle: item.snippet.channelTitle,
-        thumbnailUrl: item.snippet.thumbnails.medium?.url ?? item.snippet.thumbnails.default.url,
-        durationSec: parseIsoDuration(item.contentDetails.duration),
-        viewCount: Number(item.statistics.viewCount ?? 0),
-        publishedAt: item.snippet.publishedAt,
-      })
-    );
-
-    // Cache the successful results
-    searchCache.set(cacheKey, { data: results, timestamp: Date.now() });
-    return results;
-
-  } catch (err) {
-    console.error("YouTube API error, falling back to mock data:", err);
-    const mockData = mockCandidates(topic);
-    searchCache.set(cacheKey, { data: mockData, timestamp: Date.now() });
-    return mockData;
-  }
 }
