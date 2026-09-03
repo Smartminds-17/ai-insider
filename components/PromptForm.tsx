@@ -25,7 +25,8 @@ export default function PromptForm() {
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error?.message ?? "Something went wrong");
-      router.push(`/path/${json.data.id}`);
+      const { id } = json.data;
+      router.push(`/path/${id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong. Try again.");
       setLoading(false);

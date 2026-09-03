@@ -54,3 +54,6 @@ CREATE INDEX "LearningPath_goalId_createdAt_idx" ON "LearningPath"("goalId", "cr
 
 ALTER TABLE "Goal" ADD CONSTRAINT "Goal_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 ALTER TABLE "LearningPath" ADD CONSTRAINT "LearningPath_goalId_fkey" FOREIGN KEY ("goalId") REFERENCES "Goal"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- CreateIndex
+CREATE INDEX "Topic_selectedVideoId_idx" ON "Topic"("selectedVideoId");

@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
-import TopicWaypoint from "./TopicWaypoint";
-import RelatedRail from "./RelatedRail";
 import type { PathView } from "@/domain/types";
+import { useCallback, useEffect, useState } from "react";
+import RelatedRail from "./RelatedRail";
+import TopicWaypoint from "./TopicWaypoint";
 
 interface PathRoadmapProps {
   pathId: string;
@@ -20,6 +20,7 @@ export default function PathRoadmap({ pathId }: PathRoadmapProps) {
       return;
     }
     const json = await res.json();
+    console.log("Fetched path data:", JSON.stringify(json.data, null, 2));
     setPath(json.data);
   }, [pathId]);
 

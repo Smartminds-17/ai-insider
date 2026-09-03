@@ -162,6 +162,11 @@ export async function searchVideosForTopic(
     return mockData;
   }
 
+  // search.list costs 100 units, videos.list (details) costs 1 unit — 101 total.
+  // Block here until the global token bucket has room, so we throttle proactively
+  // instead of only reacting to 429s after quota is already blown.
+  await youtubeRateLimiter.acquire(101);
+
   try {
     const searchUrl = new URL(`${YOUTUBE_API_BASE}/search`);
     searchUrl.searchParams.set("part", "snippet");

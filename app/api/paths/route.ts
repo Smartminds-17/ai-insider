@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { after } from "next/server";
 import { getOrCreateUserId } from "@/infrastructure/auth/getOrCreateUserId";
 import { generatePath } from "@/application/generatePath";
 import { getUserPaths } from "@/application/getUserPaths";
@@ -34,7 +35,10 @@ export async function POST(req: NextRequest) {
 
   try {
     const userId = await getOrCreateUserId();
-    const pathId = await generatePath(userId, prompt);
+    const { pathId, processingPromise } = await generatePath(userId, prompt);
+    // Keep the background generation alive past this response instead of letting
+    // the serverless runtime tear it down once we return.
+    after(processingPromise);
     return NextResponse.json({ data: { id: pathId }, meta: {}, error: null }, { status: 201 });
   } catch (err) {
     console.error("generatePath failed", err);

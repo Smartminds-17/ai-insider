@@ -12,6 +12,3 @@ CREATE INDEX "LearningPath_userId_status_idx" ON "LearningPath"("userId", "statu
 
 -- CreateIndex
 CREATE INDEX "Topic_learningPathId_order_idx" ON "Topic"("learningPathId", "order");
-
--- CreateIndex
-CREATE INDEX "Topic_selectedVideoId_idx" ON "Topic"("selectedVideoId");
