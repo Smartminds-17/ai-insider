@@ -9,17 +9,21 @@ interface RelatedRailProps {
 }
 
 export default function RelatedRail({ field }: RelatedRailProps) {
-  const [videos, setVideos] = useState<RankedVideo[] | null>(null);
+  const [videos, setVideos] = useState<RankedVideo[]>([]);
   const [activeVideo, setActiveVideo] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    setLoading(true);
     fetch(`/api/related?field=${encodeURIComponent(field)}`)
       .then((res) => res.json())
       .then((json) => setVideos(json.data ?? []))
-      .catch(() => setVideos([]));
+      .catch(() => setVideos([]))
+      .finally(() => setLoading(false));
   }, [field]);
 
-  if (!videos || videos.length === 0) return null;
+  if (loading) return null;
+  if (videos.length === 0) return null;
 
   return (
     <aside className="mt-16 pt-8 border-t border-white/10">

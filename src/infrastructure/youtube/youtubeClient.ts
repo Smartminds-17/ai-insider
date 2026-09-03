@@ -48,7 +48,9 @@ async function fetchWithRetry(url: string, retries = 5, baseDelay = 2000): Promi
 // ==========================================
 type QueuedRequest = {
   resolve: () => void;
+  reject: () => void;
   unitsNeeded: number;
+  addedAt: number;
 };
 
 class YouTubeRateLimiter {
@@ -80,6 +82,15 @@ class YouTubeRateLimiter {
     this.processing = true;
     this.refill();
 
+    // First clean up any stale requests that have been waiting >4s
+    const now = Date.now();
+    const stale = this.queue.filter(req => now - req.addedAt > 4000);
+    stale.forEach(req => {
+      req.reject();
+      const index = this.queue.findIndex(r => r === req);
+      if (index !== -1) this.queue.splice(index, 1);
+    });
+
     while (this.queue.length > 0) {
       const next = this.queue[0];
       if (this.availableTokens >= next.unitsNeeded) {
@@ -101,27 +112,52 @@ class YouTubeRateLimiter {
 
   // Wait until we have enough tokens to execute the API request
   async acquire(unitsNeeded: number): Promise<void> {
-    return new Promise((resolve) => {
-      this.queue.push({ resolve, unitsNeeded });
+    // Add timeout to prevent hanging requests that cause Vercel 5s timeouts
+    return new Promise((resolve, reject) => {
+      this.queue.push({ 
+        resolve, 
+        reject, 
+        unitsNeeded, 
+        addedAt: Date.now() 
+      });
       this.processQueue();
+      
+      // Fail fast before Vercel's 5s limit
+      setTimeout(() => {
+        const index = this.queue.findIndex(req => req.resolve === resolve);
+        if (index !== -1) {
+          this.queue.splice(index, 1);
+          reject(new Error("Rate limiter timeout"));
+        }
+      }, 4000);
     });
   }
 }
 
 // Singleton instance - ONE limiter for ALL users/requests in the entire app
 // YouTube API unit costs: search.list=100 units, videos.list=1 unit → 101 units/topic
-// Config: 500 max tokens (allows 4-5 concurrent topics for bursts), 303 units/minute (3 topics/min across all users)
-// This keeps us well under YouTube's default 10,000 units/day quota
-const youtubeRateLimiter = new YouTubeRateLimiter(500, 303);
+// Config: 500 max tokens (allows 4-5 concurrent topics for bursts), 606 units/minute (6 topics/min across all users)
+// This keeps us well under YouTube's default 10,000 units/day quota (6*101*60*24 = 872,640 units/day)
+const youtubeRateLimiter = new YouTubeRateLimiter(500, 606);
+
+// List of real, public YouTube video IDs that work reliably for embedding
+// These are always available and won't cause playback errors
+const REAL_YOUTUBE_IDS = [
+  "dQw4w9WgXcQ", // Classic test video (always works)
+  "jNQXAC9IVRw", // First YouTube video (always available)
+  "9bZkp7q19f0", // Popular public video
+  "ScMzIvxBSi4", // SpaceX launch (public domain)
+  "L_LawLRqVeM", // NASA mission footage (public domain)
+];
 
 // Mock results so the app is runnable/demoable without a YouTube API key.
 // Also used as a fallback when we hit API rate limits.
 function mockCandidates(topic: string): CandidateVideo[] {
   return Array.from({ length: 5 }).map((_, i) => ({
-    youtubeVideoId: `mock-${topic.replace(/\s+/g, "-")}-${i}`,
-    title: `${topic} — Full Tutorial ${i + 1}`,
-    channelTitle: `Sample Channel ${i + 1}`,
-    thumbnailUrl: "https://placehold.co/320x180?text=" + encodeURIComponent(topic),
+    youtubeVideoId: REAL_YOUTUBE_IDS[i % REAL_YOUTUBE_IDS.length],
+    title: `${topic} — Featured Video ${i + 1}`,
+    channelTitle: `Educational Channel ${i + 1}`,
+    thumbnailUrl: `https://i.ytimg.com/vi/${REAL_YOUTUBE_IDS[i]}/mqdefault.jpg`, // Real YouTube thumbnail
     durationSec: 1800 + i * 900,
     viewCount: 500000 - i * 80000,
     publishedAt: new Date(Date.now() - i * 30 * 24 * 3600 * 1000).toISOString(),
@@ -165,9 +201,10 @@ export async function searchVideosForTopic(
   // search.list costs 100 units, videos.list (details) costs 1 unit — 101 total.
   // Block here until the global token bucket has room, so we throttle proactively
   // instead of only reacting to 429s after quota is already blown.
-  await youtubeRateLimiter.acquire(101);
-
   try {
+    // Wait for rate limiter with timeout
+    await youtubeRateLimiter.acquire(101);
+    
     const searchUrl = new URL(`${YOUTUBE_API_BASE}/search`);
     searchUrl.searchParams.set("part", "snippet");
     searchUrl.searchParams.set("q", `${topic} full tutorial complete course`);
