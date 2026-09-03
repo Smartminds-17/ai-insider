@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useState } from "react";
 
 const EXAMPLES = ["Become a data analyst", "Learn UI design fundamentals", "Start making short-form video content"];
 
