@@ -82,6 +82,11 @@ class GeminiRateLimiter {
 // This uses 1 token per path generation, keeping you safely under 20/day
 const geminiRateLimiter = new GeminiRateLimiter(1, 19);
 
+// In-memory cache for generated syllabi to avoid redundant Gemini API calls
+// Caches identical prompts for 24 hours to save quota and improve speed
+const syllabusCache = new Map<string, { data: Syllabus; timestamp: number }>();
+const SYLLABUS_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
+
 const SYSTEM_PROMPT = `You turn a learner's stated goal into a short, ordered
 learning syllabus. Respond with ONLY valid JSON, no prose, no markdown fences,
 in this exact shape:
@@ -96,8 +101,16 @@ Rules:
 - Do not include a "practice" or "quiz" topic; topics are learning-content only.`;
 
 export async function generateSyllabus(prompt: string): Promise<Syllabus> {
+  // Check cache first - return cached syllabus if available
+  const cacheKey = prompt.trim().toLowerCase();
+  const cached = syllabusCache.get(cacheKey);
+  if (cached && Date.now() - cached.timestamp < SYLLABUS_CACHE_TTL) {
+    console.log("📦 Returning cached syllabus for:", prompt.slice(0, 50));
+    return cached.data;
+  }
+
   if (!genAI) {
-    return {
+    const mockSyllabus = {
       title: `Learning path: ${prompt.slice(0, 60)}`,
       topics: [
         { title: "Fundamentals", order: 0 },
@@ -107,6 +120,9 @@ export async function generateSyllabus(prompt: string): Promise<Syllabus> {
         { title: "Real-world application", order: 4 },
       ],
     };
+    // Cache mock syllabi too
+    syllabusCache.set(cacheKey, { data: mockSyllabus, timestamp: Date.now() });
+    return mockSyllabus;
   }
 
   const model = genAI.getGenerativeModel({
@@ -154,8 +170,12 @@ export async function generateSyllabus(prompt: string): Promise<Syllabus> {
     throw new Error("Syllabus generation returned unexpected format");
   }
 
-  return {
+  const finalSyllabus = {
     title: parsed.title ?? `Learning path: ${prompt.slice(0, 60)}`,
     topics: topicTitles.map((title, order) => ({ title, order })),
   };
+  // Cache the successfully generated syllabus
+  syllabusCache.set(cacheKey, { data: finalSyllabus, timestamp: Date.now() });
+  console.log("🧠 Generated and cached new syllabus:", finalSyllabus.title);
+  return finalSyllabus;
 }

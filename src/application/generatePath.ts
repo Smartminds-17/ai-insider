@@ -93,15 +93,13 @@ export async function generatePath(userId: string, prompt: string): Promise<{ pa
         }
       };
 
-      // Process topics one at a time with longer delays between them to avoid YouTube API rate limits
-      // YouTube API has a default quota of 10,000 units/day:
-      // - search.list = 100 units
-      // - videos.list = 1 unit
-      // Total per topic: ~101 units → 5s delay = 720 topics/day (72,720 units, which is within safe limits)
-      for (const topic of syllabus.topics) {
-        await processTopic(topic);
-        // Wait 5 seconds between topics to stay well under YouTube's quota limits
-        await new Promise(resolve => setTimeout(resolve, 5000));
+      // Process topics in controlled parallel batches (2 at a time)
+      // Our global YouTube rate limiter handles quota management automatically
+      // No need for manual setTimeout delays - the token bucket prevents API overloads
+      const batchSize = 2; // Process 2 topics concurrently
+      for (let i = 0; i < syllabus.topics.length; i += batchSize) {
+        const batch = syllabus.topics.slice(i, i + batchSize);
+        await Promise.all(batch.map(topic => processTopic(topic)));
       }
 
       await prisma.learningPath.update({
