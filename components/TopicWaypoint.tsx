@@ -21,6 +21,18 @@ export default function TopicWaypoint({ topic, isLast, onToggleWatched }: TopicW
   const watchedCount = topic.videos.filter((v) => v.watched).length;
   const complete = topic.videos.length > 0 && watchedCount === topic.videos.length;
 
+  // ALL JAVASCRIPT MUST BE BEFORE THE return() STATEMENT - this is the correct place!
+  const handleToggle = () => {
+    if (expanded) {
+      // Find any YouTube iframes in this component and pause them
+      const iframes = document.querySelectorAll<HTMLIFrameElement>('.topic-waypoint iframe');
+      iframes.forEach(iframe => {
+        iframe.contentWindow?.postMessage('{"event":"command","func":"pauseVideo","args":""}', '*');
+      });
+    }
+    setExpanded((v) => !v);
+  };
+
   return (
     <div className="relative pl-14">
 
@@ -31,6 +43,7 @@ export default function TopicWaypoint({ topic, isLast, onToggleWatched }: TopicW
           style={{ background: complete ? "var(--route)" : "var(--route-dim)" }}
         />
       )}
+
       <div
         className="absolute left-2.5 top-1 w-6 h-6 rounded-full border-2 flex items-center justify-center font-mono text-[10px]"
         style={{
@@ -43,8 +56,8 @@ export default function TopicWaypoint({ topic, isLast, onToggleWatched }: TopicW
       </div>
 
       <button
-        onClick={() => setExpanded((v) => !v)}
-        className="w-full text-left pb-2 group"
+        onClick={handleToggle}
+        className="w-full text-left pb-2 group topic-waypoint"
       >
         <div className="flex items-center justify-between gap-3">
           <h3 className="font-display text-lg group-hover:text-[var(--route)] transition">
@@ -54,6 +67,34 @@ export default function TopicWaypoint({ topic, isLast, onToggleWatched }: TopicW
             {watchedCount}/{topic.videos.length}
           </span>
         </div>
+        
+        {/* Show thumbnails of first few videos when collapsed */}
+        {!expanded && topic.videos.length > 0 && (
+          <div className="mt-3 flex gap-2 overflow-hidden">
+            {topic.videos.slice(0, 4).map((video) => (
+              <div key={video.id} className="w-24 h-16 rounded-md overflow-hidden bg-[var(--ink)] shrink-0 relative">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={video.thumbnailUrl}
+                  alt={video.title}
+                  className="w-full h-full object-cover"
+                />
+                {video.watched && (
+                  <div className="absolute inset-0 bg-[var(--route)]/60 flex items-center justify-center">
+                    <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                  </div>
+                )}
+              </div>
+            ))}
+            {topic.videos.length > 4 && (
+              <div className="w-24 h-16 rounded-md bg-[var(--ink-2)] flex items-center justify-center shrink-0 text-xs text-[var(--text-dim)] font-mono">
+                +{topic.videos.length - 4} more
+              </div>
+            )}
+          </div>
+        )}
       </button>
 
       {expanded && (
