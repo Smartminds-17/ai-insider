@@ -1,6 +1,7 @@
 "use client";
 
 import type { PathView } from "@/domain/types";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import RelatedRail from "./RelatedRail";
 import TopicWaypoint from "./TopicWaypoint";
@@ -10,8 +11,10 @@ interface PathRoadmapProps {
 }
 
 export default function PathRoadmap({ pathId }: PathRoadmapProps) {
+  const router = useRouter();
   const [path, setPath] = useState<PathView | null>(null);
   const [notFound, setNotFound] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const fetchPath = useCallback(async () => {
     const res = await fetch(`/api/paths/${pathId}`);
@@ -58,6 +61,27 @@ export default function PathRoadmap({ pathId }: PathRoadmapProps) {
     });
   }
 
+  async function handleDelete() {
+    if (!path || deleting) return;
+    
+    if (!window.confirm("Are you sure you want to delete this route? This action cannot be undone.")) {
+      return;
+    }
+    
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/paths/${pathId}`, {
+        method: "DELETE",
+      });
+      if (res.ok) {
+        router.push("/paths"); // Redirect back to your routes list after deletion
+      }
+    } catch (err) {
+      console.error("Failed to delete path:", err);
+      setDeleting(false);
+    }
+  }
+
   if (notFound) {
     return (
       <div className="flex-1 flex items-center justify-center px-6">
@@ -84,7 +108,16 @@ export default function PathRoadmap({ pathId }: PathRoadmapProps) {
         <p className="font-mono text-xs tracking-widest uppercase text-[var(--route)] mb-3">
           {path.status === "GENERATING" ? "Charting route…" : `${pct}% complete`}
         </p>
-        <h1 className="font-display text-3xl font-medium mb-10">{path.title}</h1>
+        <div className="flex items-start justify-between mb-10">
+          <h1 className="font-display text-3xl font-medium">{path.title}</h1>
+          <button 
+            onClick={handleDelete}
+            disabled={deleting}
+            className="px-3 py-1 text-sm text-red-400 border border-red-400 rounded hover:bg-red-400 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {deleting ? "Deleting..." : "Delete Route"}
+          </button>
+        </div>
 
         {path.status === "GENERATING" && (
           <p className="font-mono text-sm text-[var(--text-dim)] animate-pulse mb-10">

@@ -30,6 +30,10 @@ export default function PromptForm() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong. Try again.");
       setLoading(false);
+    } finally {
+      // Always reset loading state if navigation fails for any reason
+      // This prevents the button from staying disabled permanently
+      setTimeout(() => setLoading(false), 1000);
     }
   }
 

@@ -83,16 +83,16 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 2. Check for duplicate active paths with the EXACT same prompt to avoid duplicates
-    // If the user already created a path with this prompt that's still GENERATING, return that path ID instead of creating a new one
+    // 2. Check for ANY duplicate paths (both GENERATING and READY) with the EXACT same prompt to avoid duplicates
+    // This prevents double-clicks or resubmissions from creating multiple identical paths
     const existingPaths = await getUserPaths(userId);
-    const duplicateActivePath = existingPaths.find(p => 
-      p.prompt.trim() === prompt && p.status === "GENERATING"
+    const duplicatePath = existingPaths.find(p => 
+      p.prompt.trim() === prompt && (p.status === "GENERATING" || p.status === "READY")
     );
     
-    if (duplicateActivePath) {
-      console.log(`Found duplicate active path for prompt: ${prompt}, returning existing ID: ${duplicateActivePath.id}`);
-      return NextResponse.json({ data: { id: duplicateActivePath.id }, meta: {}, error: null }, { status: 202 });
+    if (duplicatePath) {
+      console.log(`Found existing path for prompt: ${prompt}, returning existing ID: ${duplicatePath.id}`);
+      return NextResponse.json({ data: { id: duplicatePath.id }, meta: {}, error: null }, { status: 202 });
     }
 
     // 3. Use production-grade queue to handle path generation
