@@ -15,6 +15,18 @@ export default function PathRoadmap({ pathId }: PathRoadmapProps) {
   const [path, setPath] = useState<PathView | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [expandedTopicIndex, setExpandedTopicIndex] = useState<number | null>(null); // ONLY ONE TOPIC EXPANDED AT A TIME
+
+  // Single-source-of-truth for which topic is expanded - only one can ever be open!
+  const handleToggleTopic = (index: number) => {
+    if (expandedTopicIndex === index) {
+      // Closing the currently open topic
+      setExpandedTopicIndex(null);
+    } else {
+      // Opening a new topic - automatically closes the previous one, so only one video is ever loaded
+      setExpandedTopicIndex(index);
+    }
+  };
 
   const fetchPath = useCallback(async () => {
     const res = await fetch(`/api/paths/${pathId}`);
@@ -138,6 +150,8 @@ export default function PathRoadmap({ pathId }: PathRoadmapProps) {
               topic={topic}
               isLast={i === path.topics.length - 1}
               onToggleWatched={handleToggleWatched}
+              isExpanded={expandedTopicIndex === i}
+              onToggle={() => handleToggleTopic(i)}
             />
           ))}
         </div>

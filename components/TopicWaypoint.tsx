@@ -1,13 +1,14 @@
 "use client";
 
 import type { PathView } from "@/domain/types";
-import { useState } from "react";
 import VideoEmbed from "./VideoEmbed";
 
 interface TopicWaypointProps {
   topic: PathView["topics"][number];
   isLast: boolean;
   onToggleWatched: (videoId: string, watched: boolean) => void;
+  isExpanded: boolean;
+  onToggle: () => void;
 }
 
 function formatDuration(sec: number): string {
@@ -16,21 +17,20 @@ function formatDuration(sec: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-export default function TopicWaypoint({ topic, isLast, onToggleWatched }: TopicWaypointProps) {
-  const [expanded, setExpanded] = useState(false);
+export default function TopicWaypoint({ topic, isLast, onToggleWatched, isExpanded, onToggle }: TopicWaypointProps) {
   const watchedCount = topic.videos.filter((v) => v.watched).length;
   const complete = topic.videos.length > 0 && watchedCount === topic.videos.length;
 
-  // ALL JAVASCRIPT MUST BE BEFORE THE return() STATEMENT - this is the correct place!
-  const handleToggle = () => {
-    if (expanded) {
-      // Find any YouTube iframes in this component and pause them
+  // Wrapper that calls parent's onToggle - this component doesn't control its own expansion!
+  const handleClick = () => {
+    if (isExpanded) {
+      // If we're closing this topic, pause any playing video inside before unmounting it
       const iframes = document.querySelectorAll<HTMLIFrameElement>('.topic-waypoint iframe');
       iframes.forEach(iframe => {
         iframe.contentWindow?.postMessage('{"event":"command","func":"pauseVideo","args":""}', '*');
       });
     }
-    setExpanded((v) => !v);
+    onToggle(); // Tell parent to update the single expanded topic
   };
 
   return (
@@ -56,7 +56,7 @@ export default function TopicWaypoint({ topic, isLast, onToggleWatched }: TopicW
       </div>
 
       <button
-        onClick={handleToggle}
+        onClick={handleClick}
         className="w-full text-left pb-2 group topic-waypoint"
       >
         <div className="flex items-center justify-between gap-3">
@@ -69,7 +69,7 @@ export default function TopicWaypoint({ topic, isLast, onToggleWatched }: TopicW
         </div>
         
         {/* Show thumbnails of first few videos when collapsed */}
-        {!expanded && topic.videos.length > 0 && (
+        {!isExpanded && topic.videos.length > 0 && (
           <div className="mt-3 flex gap-2 overflow-hidden">
             {topic.videos.slice(0, 4).map((video) => (
               <div key={video.id} className="w-24 h-16 rounded-md overflow-hidden bg-[var(--ink)] shrink-0 relative">
@@ -97,7 +97,7 @@ export default function TopicWaypoint({ topic, isLast, onToggleWatched }: TopicW
         )}
       </button>
 
-      {expanded && (
+      {isExpanded && (
         <div className="pb-8 space-y-4">
           {topic.videos.map((video) => (
             <div key={video.id} className="bg-[var(--ink-2)] border border-white/10 rounded-lg p-3">
@@ -130,7 +130,7 @@ export default function TopicWaypoint({ topic, isLast, onToggleWatched }: TopicW
           ))}
         </div>
       )}
-      {!expanded && <div className="pb-6" />}
+      {!isExpanded && <div className="pb-6" />}
     </div>
   );
 }
