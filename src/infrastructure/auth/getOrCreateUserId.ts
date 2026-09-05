@@ -6,12 +6,24 @@ import { cookies } from "next/headers";
 
 export const COOKIE_NAME = "ai_insider_uid";
 
-function cookieOptions() {
+// Persistent cookie options for AUTHENTICATED users (30 days)
+function persistentCookieOptions() {
   return {
     httpOnly: true,
     sameSite: "strict" as const,
     path: "/",
-    maxAge: 30 * 24 * 60 * 60,
+    maxAge: 30 * 24 * 60 * 60, // 30 days
+    secure: process.env.NODE_ENV === "production",
+  };
+}
+
+// 1-hour TTL cookie for ANONYMOUS users (expires after 1 hour, deleted on refresh/browser close)
+function sessionCookieOptions() {
+  return {
+    httpOnly: true,
+    sameSite: "strict" as const,
+    path: "/",
+    maxAge: 3600, // 1 hour — matches path TTL, deleted after that OR when browser is closed
     secure: process.env.NODE_ENV === "production",
   };
 }
@@ -41,8 +53,8 @@ export async function getOrCreateUserId(): Promise<string> {
         await mergeAnonymousUser(cookieId, authUser.id);
       }
     }
-    // Always set the cookie to the current authenticated user's ID
-    cookieStore.set(COOKIE_NAME, authUser.id, cookieOptions());
+    // Always set the cookie to the current authenticated user's ID (PERSISTENT)
+    cookieStore.set(COOKIE_NAME, authUser.id, persistentCookieOptions());
     return authUser.id;
   }
 
@@ -51,7 +63,8 @@ export async function getOrCreateUserId(): Promise<string> {
     if (user) return user.id;
   }
 
+  // Create NEW anonymous user — set SESSION-ONLY cookie (deleted on refresh/browser close)
   const newUser = await prisma.user.create({ data: {} });
-  cookieStore.set(COOKIE_NAME, newUser.id, cookieOptions());
+  cookieStore.set(COOKIE_NAME, newUser.id, sessionCookieOptions());
   return newUser.id;
 }

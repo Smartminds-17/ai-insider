@@ -30,9 +30,28 @@ interface ProgressRow {
   watched: boolean;
 }
 
+// 1 hour TTL for anonymous user paths (deleted after refresh/navigate away)
+const ANONYMOUS_PATH_TTL_SECONDS = 3600;
+
 export async function getPath(pathId: string, userId: string): Promise<PathView | null> {
+  // First check if the current user is an anonymous user (no email)
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { email: true }
+  });
+  const isAnonymous = !user?.email;
+
   const path = await prisma.learningPath.findFirst({
-    where: { id: pathId, userId },
+    where: { 
+      id: pathId, 
+      userId,
+      // For anonymous users, only return paths created in the last 1 hour
+      ...(isAnonymous && {
+        createdAt: {
+          gte: new Date(Date.now() - ANONYMOUS_PATH_TTL_SECONDS * 1000)
+        }
+      })
+    },
     include: {
       topics: {
         orderBy: { order: "asc" },

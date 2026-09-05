@@ -108,6 +108,13 @@ We've implemented critical fixes to resolve concurrency, rate-limit, and perform
   - Full `/pricing` page is still accessible directly but not linked from the main landing page
 - To enable monetization/community features later: only backend logic needs to be added, no UI/markup changes required
 
+## 🚀 Anonymous user path cleanup
+Non-logged-in users (anonymous) have their paths automatically expired after 1 hour:
+- Cookie TTL: 1 hour for anonymous users (deleted on refresh or after 60 minutes)
+- Path TTL: Any anonymous user path older than 1 hour returns 404
+- Daily cleanup job: `/api/cron/cleanup-anonymous-paths` (call via Supabase Cron to permanently delete old anonymous paths/users older than 24h)
+- Authenticated/registered users keep their paths forever (30-day persistent cookie)
+
 - **Editable syllabus**: insert a review/edit screen between syllabus
   generation and video sourcing in `src/application/generatePath.ts`.
 - **Monetization**: gate `generatePath` calls per month on the free tier —

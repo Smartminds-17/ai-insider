@@ -25,6 +25,7 @@ export default function PathRoadmap({ pathId }: PathRoadmapProps) {
     const res = await fetch(`/api/paths/${pathId}`);
     if (res.status === 404) {
       setNotFound(true);
+      setPath(null); // Clear path state if it becomes not found later
       return;
     }
     const json = await res.json();
@@ -63,6 +64,15 @@ export default function PathRoadmap({ pathId }: PathRoadmapProps) {
     });
   }
 
+  // If path becomes not found after loading, redirect to /paths
+  useEffect(() => {
+    if (notFound) {
+      // Wait a second then redirect so the not-found message shows briefly
+      const redirect = setTimeout(() => router.push("/paths"), 2000);
+      return () => clearTimeout(redirect);
+    }
+  }, [notFound, router]);
+
   async function handleDelete() {
     if (!path || deleting) return;
     if (!window.confirm("Are you sure you want to delete this route? This action cannot be undone.")) {
@@ -75,6 +85,9 @@ export default function PathRoadmap({ pathId }: PathRoadmapProps) {
       });
       if (res.ok) {
         router.push("/paths");
+      } else if (res.status === 404) {
+        // If path is already gone, just redirect
+        setNotFound(true);
       }
     } catch (err) {
       console.error("Failed to delete path:", err);
