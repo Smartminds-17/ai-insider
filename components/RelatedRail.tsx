@@ -38,8 +38,8 @@ export default function RelatedRail({ field }: RelatedRailProps) {
   if (videos.length === 0) return null;
 
   return (
-    <aside className="mt-16 pt-8 border-t border-white/10">
-      <p className="font-mono text-xs tracking-widest uppercase text-[var(--sage)] mb-4">
+    <section className="section-rail">
+      <p className="legend-label legend-label--sage mb-4">
         Off the trail — for inspiration
       </p>
       <div className="space-y-4">
@@ -86,6 +86,6 @@ export default function RelatedRail({ field }: RelatedRailProps) {
           ))}
         </div>
       </div>
-    </aside>
+    </section>
   );
 }

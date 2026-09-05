@@ -6,13 +6,19 @@
      language borrows from topographic maps — not the cream/serif/terracotta
      or near-black/acid-accent defaults. */
   --ink: #10161A;         /* near-black, slight blue-green cast, like night terrain */
+  --ink-2: #1B242A;       /* card surface on dark bg */
+  --ink-3: #243038;
+  --ink-4: #2E3C46;
   --paper: #F4F1E9;       /* keep for light surfaces (cards) only, not full bg */
+  --paper-ink: #2A2520;
   --route: #E8A33D;       /* amber waypoint / progress line — the one accent */
   --route-dim: #6B5530;   /* muted amber for unvisited route segments */
-  --sage: #7C9885;        /* secondary, muted green */
-  --ink-2: #1B242A;       /* card surface on dark bg */
+  --sage: #7C9885;        /* secondary, muted green — community/mentor 2° CTAs */
+  --sage-dim: #4A6152;
   --text: #EDEDE6;
   --text-dim: #9AA3A0;
+  --ok: #7C9885;
+  --warn: #E8A33D;
 }
 
 body {
@@ -27,4 +33,165 @@ body {
 
 .font-mono {
   font-family: var(--font-geist-mono), 'IBM Plex Mono', monospace;
+}
+
+/* ─── LEGEND LABEL ─── the "map legend" mono chip used everywhere ───────── */
+.legend-label {
+  font-family: var(--font-geist-mono), 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+}
+@media (min-width: 640px) {
+  .legend-label { font-size: 11px; }
+}
+.legend-label--route { color: var(--route); }
+.legend-label--sage  { color: var(--sage); }
+.legend-label--dim   { color: var(--text-dim); }
+
+/* ─── SURFACE CARD ─── the "topographic tile" panel used by tiers, rails ─ */
+.surface-card {
+  background: linear-gradient(180deg, var(--ink-2) 0%, var(--ink) 100%);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 14px;
+  position: relative;
+  overflow: hidden;
+}
+.surface-card::before {
+  content: "";
+  position: absolute; inset: 0;
+  background-image:
+    linear-gradient(to right, rgba(255,255,255,0.025) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255,255,255,0.025) 1px, transparent 1px);
+  background-size: 40px 40px;
+  mask-image: radial-gradient(ellipse at top left, #000 0%, transparent 75%);
+  -webkit-mask-image: radial-gradient(ellipse at top left, #000 0%, transparent 75%);
+  pointer-events: none;
+}
+.surface-card > * { position: relative; z-index: 1; }
+
+.surface-card--paper {
+  background: linear-gradient(180deg, var(--paper) 0%, #ECE6D7 100%);
+  color: var(--paper-ink);
+  border-color: rgba(42,37,32,0.08);
+}
+.surface-card--paper::before {
+  background-image:
+    linear-gradient(to right, rgba(42,37,32,0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(42,37,32,0.05) 1px, transparent 1px);
+}
+
+/* ─── CHIP ─── pill/tag shared by examples, tier badges, usage meter ───── */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-family: var(--font-geist-mono), 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  border: 1px solid transparent;
+  transition: border-color 0.18s ease, background 0.18s ease, color 0.18s ease;
+  white-space: nowrap;
+}
+.chip--ink {
+  background: rgba(255,255,255,0.03);
+  border-color: rgba(255,255,255,0.10);
+  color: var(--text-dim);
+}
+.chip--ink:hover {
+  color: var(--text);
+  border-color: rgba(255,255,255,0.20);
+  background: rgba(255,255,255,0.05);
+}
+.chip--route {
+  background: rgba(232,163,61,0.10);
+  border-color: rgba(232,163,61,0.35);
+  color: var(--route);
+}
+.chip--sage {
+  background: rgba(124,152,133,0.10);
+  border-color: rgba(124,152,133,0.35);
+  color: var(--sage);
+}
+.chip--paper {
+  background: rgba(42,37,32,0.06);
+  border-color: rgba(42,37,32,0.14);
+  color: var(--paper-ink);
+}
+.chip__dot {
+  width: 6px; height: 6px;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.65;
+  display: inline-block;
+}
+
+/* ─── BUTTONS ─── tier-aware: route = primary, sage = mentor/community 2° */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-radius: 10px;
+  font-family: 'Space Grotesk', system-ui, sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  transition: filter 0.18s ease, background 0.18s ease, border-color 0.18s ease, transform 0.08s ease;
+  cursor: pointer;
+  border: 1px solid transparent;
+  line-height: 1;
+}
+.btn:active { transform: translateY(1px); }
+.btn--block { width: 100%; }
+.btn--route {
+  background: var(--route);
+  color: #1A1308;
+  box-shadow: 0 1px 0 rgba(255,255,255,0.18) inset, 0 10px 30px -16px rgba(232,163,61,0.65);
+}
+.btn--route:hover { filter: brightness(1.06); }
+.btn--sage {
+  background: var(--sage);
+  color: #0F1713;
+  box-shadow: 0 1px 0 rgba(255,255,255,0.18) inset;
+}
+.btn--sage:hover { filter: brightness(1.06); }
+.btn--ink {
+  background: var(--ink-3);
+  color: var(--text);
+  border-color: rgba(255,255,255,0.10);
+}
+.btn--ink:hover { border-color: rgba(255,255,255,0.25); background: var(--ink-4); }
+.btn--paper {
+  background: var(--paper);
+  color: var(--paper-ink);
+}
+.btn--paper:hover { filter: brightness(0.97); }
+.btn--ghost {
+  color: var(--text-dim);
+  background: transparent;
+  border-style: dashed;
+  border-color: rgba(255,255,255,0.15);
+}
+.btn--ghost:hover { color: var(--text); border-color: rgba(255,255,255,0.35); }
+
+/* ─── SECTION RAIL ─── (RelatedRail / CommunityRail / MentorRail) ──────── */
+.section-rail {
+  margin-top: 4rem;
+  padding-top: 2rem;
+  border-top: 1px solid rgba(255,255,255,0.10);
+}
+
+/* ─── DOT / AVATAR / PRESENCE helpers ──────────────────────────────────── */
+.presence-dot {
+  width: 8px; height: 8px; border-radius: 999px;
+  background: var(--sage);
+  box-shadow: 0 0 0 2px rgba(124,152,133,0.25);
+  display: inline-block;
+}
+.presence-dot--route {
+  background: var(--route);
+  box-shadow: 0 0 0 2px rgba(232,163,61,0.25);
 }

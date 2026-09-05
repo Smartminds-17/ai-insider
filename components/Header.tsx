@@ -1,8 +1,8 @@
 "use client";
 
+import { useSession } from "next-auth/react";
 import Image from "next/image";
 import Link from "next/link";
-import { useSession } from "next-auth/react";
 import SignInButton from "./SignInButton";
 import SignOutButton from "./SignOutButton";
 
@@ -20,6 +20,16 @@ export default function Header() {
           className="text-sm text-[var(--text-dim)] hover:text-[var(--text)] transition hidden sm:inline"
         >
           My Paths
+        </Link>
+        {/* Design-only: Usage meter chip slot (for free-tier users, future billing) */}
+        <span className="chip chip--ink hidden sm:inline-flex" data-usage-slot>
+          <span className="legend-label legend-label--dim">2/3 routes</span>
+        </span>
+        <Link
+          href="/pricing"
+          className="text-sm text-[var(--text-dim)] hover:text-[var(--text)] transition hidden sm:inline"
+        >
+          Pricing
         </Link>
         {status === "loading" ? (
           <span className="text-xs text-[var(--text-dim)]">Loading...</span>

@@ -99,6 +99,15 @@ We've implemented critical fixes to resolve concurrency, rate-limit, and perform
 
 ## Where to extend next
 
+## 📝 Hidden UI Elements (Reminders for future implementation)
+- **Pricing teaser on landing page**: Commented out in `app/page.tsx` (lines ~35-175) — uncomment the entire section to restore the tier preview cards and "Full plans" link
+- **Design-only feature slots**: All future feature markup is already in the codebase but hidden/unused, ready to wire up later:
+  - Billing/payment gate: `data-gate-slot` in `components/PromptForm.tsx`
+  - Usage meter chip in `components/Header.tsx` (tracks free-tier route limits)
+  - CommunityRail and MentorRail sections in `components/PathRoadmap.tsx`
+  - Full `/pricing` page is still accessible directly but not linked from the main landing page
+- To enable monetization/community features later: only backend logic needs to be added, no UI/markup changes required
+
 - **Editable syllabus**: insert a review/edit screen between syllabus
   generation and video sourcing in `src/application/generatePath.ts`.
 - **Monetization**: gate `generatePath` calls per month on the free tier —
