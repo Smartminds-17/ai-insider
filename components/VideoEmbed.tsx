@@ -64,8 +64,8 @@ export default function VideoEmbed({ youtubeVideoId, title }: VideoEmbedProps) {
                     '{"event":"command","func":"pauseVideo","args":""}',
                     "*"
                   );
-                } catch (e) {
-                  console.log("Failed to pause previous player");
+                } catch (err) {
+                  console.log("Failed to pause previous player", err);
                 }
               }
               // Set this iframe as the new active playing one
