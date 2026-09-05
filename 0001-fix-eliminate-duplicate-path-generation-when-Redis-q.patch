@@ -1,0 +1,491 @@
+From fa71cc1192eece19c42c1c82271aac9201fa22dc Mon Sep 17 00:00:00 2001
+From: josephlyimo <josephlyimo201@gmail.com>
+Date: Sat, 5 Sep 2026 09:23:36 +0000
+Subject: [PATCH] fix: eliminate duplicate path generation when Redis queue is
+ active
+
+- Split generatePath() into createLearningPath() (fast phase: one Gemini
+  call + Goal/LearningPath rows) and processLearningPathTopics() (slow
+  phase: per-topic YouTube sourcing). generatePath() remains as a
+  convenience wrapper composing both, for local dev.
+- pathGeneration.queue.ts now calls createLearningPath() once, then either
+  hands the already-generated syllabus to the BullMQ worker (production)
+  or runs processLearningPathTopics() inline (local dev) - never both.
+  Previously, queuePathGeneration() called the old generatePath() (which
+  started the full pipeline as a side effect) AND enqueued a worker job
+  that called it again, doubling every Gemini call and YouTube sourcing
+  pass, and leaving an orphaned duplicate Goal/LearningPath row per
+  request whenever Redis was configured.
+- Removed unused InMemoryQueueJob interface (queue.ts).
+
+fix: remove explicit 'any' types from getPath.ts and getUserPaths.ts
+
+Replaced any-typed callback params with local interfaces describing the
+query result shapes actually used, resolving the eslint
+no-explicit-any errors on these two live/active files.
+---
+ src/application/generatePath.ts               | 204 ++++++++++--------
+ src/application/getPath.ts                    |  43 +++-
+ src/application/getUserPaths.ts               |  25 ++-
+ .../queues/pathGeneration.queue.ts            |  52 ++---
+ 4 files changed, 202 insertions(+), 122 deletions(-)
+
+diff --git a/src/application/generatePath.ts b/src/application/generatePath.ts
+index 73c4eb3..ee5c11f 100644
+--- a/src/application/generatePath.ts
++++ b/src/application/generatePath.ts
+@@ -1,11 +1,23 @@
+ import { prisma } from "@/infrastructure/db/prisma";
++import type { Syllabus } from "@/domain/types";
+ import { generateSyllabus } from "@/infrastructure/llm/syllabusGenerator";
+ import { rankVideos } from "@/infrastructure/youtube/rankVideos";
+ import { searchVideosForTopic } from "@/infrastructure/youtube/youtubeClient";
+ 
+ const VIDEOS_PER_TOPIC = 5;
+ 
+-export async function generatePath(userId: string, prompt: string): Promise<{ pathId: string; processingPromise: Promise<void> }> {
++/**
++ * Fast phase: one Gemini call + two DB writes. Creates the Goal and
++ * LearningPath rows (status GENERATING) and returns immediately so the
++ * caller can hand the user a real path ID right away. Does NOT touch
++ * YouTube — that's the slow phase, handled separately by
++ * processLearningPathTopics() so it only ever runs once per path
++ * regardless of whether a queue is involved.
++ */
++export async function createLearningPath(
++  userId: string,
++  prompt: string
++): Promise<{ pathId: string; syllabus: Syllabus }> {
+   const syllabus = await generateSyllabus(prompt);
+ 
+   const goal = await prisma.goal.create({
+@@ -28,104 +40,122 @@ export async function generatePath(userId: string, prompt: string): Promise<{ pa
+     },
+   });
+ 
+-  // Create the processing promise first, return it to the API route to pass to waitUntil()
+-  // This guarantees Next.js keeps the request context alive until processing completes
+-  const processingPromise = (async () => {
+-    try {
+-      // Process all topics in parallel (max 3 at a time to avoid rate limits)
+-      const processTopic = async (topic: { title: string; order: number }) => {
+-        const createdTopic = await prisma.topic.create({
+-          data: {
+-            learningPathId: path.id,
+-            title: topic.title,
+-            order: topic.order,
+-          },
+-        });
++  return { pathId: path.id, syllabus };
++}
+ 
+-        const candidates = await searchVideosForTopic(topic.title, 12);
+-        const ranked = rankVideos(candidates, VIDEOS_PER_TOPIC);
+-
+-        let firstVideoId: string | null = null;
++/**
++ * Slow phase: sources and ranks YouTube videos for every topic in the
++ * syllabus, one topic at a time (to respect the free-tier rate limiter),
++ * then flips the path to READY (or FAILED). Call this exactly once per
++ * path — whether inline (local dev) or from a queue worker (production).
++ */
++export async function processLearningPathTopics(pathId: string, syllabus: Syllabus): Promise<void> {
++  try {
++    const processTopic = async (topic: { title: string; order: number }) => {
++      const createdTopic = await prisma.topic.create({
++        data: {
++          learningPathId: pathId,
++          title: topic.title,
++          order: topic.order,
++        },
++      });
+ 
+-        // Create all video records in parallel first (to avoid duplicates)
+-        const videos = await Promise.all(
+-          ranked.map((v) =>
+-            prisma.video.upsert({
+-              where: { youtubeVideoId: v.youtubeVideoId },
+-              update: {
+-                title: v.title,
+-                channelTitle: v.channelTitle,
+-                thumbnailUrl: v.thumbnailUrl,
+-                durationSec: v.durationSec,
+-                viewCount: v.viewCount,
+-                publishedAt: new Date(v.publishedAt),
+-              },
+-              create: {
+-                youtubeVideoId: v.youtubeVideoId,
+-                title: v.title,
+-                channelTitle: v.channelTitle,
+-                thumbnailUrl: v.thumbnailUrl,
+-                durationSec: v.durationSec,
+-                viewCount: v.viewCount,
+-                publishedAt: new Date(v.publishedAt),
+-              },
+-            })
+-          )
+-        );
++      const candidates = await searchVideosForTopic(topic.title, 12);
++      const ranked = rankVideos(candidates, VIDEOS_PER_TOPIC);
+ 
+-        // Process topic-video associations sequentially to maintain order
+-        for (let i = 0; i < videos.length; i++) {
+-          const video = videos[i];
+-          if (i === 0) firstVideoId = video.id;
++      let firstVideoId: string | null = null;
+ 
+-          // Use upsert to avoid unique constraint violations if the same video is reused for multiple topics
+-          await prisma.topicVideo.upsert({
+-            where: {
+-              topicId_videoId: {
+-                topicId: createdTopic.id,
+-                videoId: video.id,
+-              },
++      // Create all video records in parallel first (to avoid duplicates)
++      const videos = await Promise.all(
++        ranked.map((v) =>
++          prisma.video.upsert({
++            where: { youtubeVideoId: v.youtubeVideoId },
++            update: {
++              title: v.title,
++              channelTitle: v.channelTitle,
++              thumbnailUrl: v.thumbnailUrl,
++              durationSec: v.durationSec,
++              viewCount: v.viewCount,
++              publishedAt: new Date(v.publishedAt),
+             },
+-            update: {}, // If it exists, do nothing
+             create: {
++              youtubeVideoId: v.youtubeVideoId,
++              title: v.title,
++              channelTitle: v.channelTitle,
++              thumbnailUrl: v.thumbnailUrl,
++              durationSec: v.durationSec,
++              viewCount: v.viewCount,
++              publishedAt: new Date(v.publishedAt),
++            },
++          })
++        )
++      );
++
++      // Process topic-video associations sequentially to maintain order
++      for (let i = 0; i < videos.length; i++) {
++        const video = videos[i];
++        if (i === 0) firstVideoId = video.id;
++
++        // Use upsert to avoid unique constraint violations if the same video is reused for multiple topics
++        await prisma.topicVideo.upsert({
++          where: {
++            topicId_videoId: {
+               topicId: createdTopic.id,
+               videoId: video.id,
+-              order: i,
+-              source: "GENERATED",
+-              selected: i === 0,
+             },
+-          });
+-        }
+-
+-        if (firstVideoId) {
+-          await prisma.topic.update({
+-            where: { id: createdTopic.id },
+-            data: { selectedVideoId: firstVideoId },
+-          });
+-        }
+-      };
++          },
++          update: {}, // If it exists, do nothing
++          create: {
++            topicId: createdTopic.id,
++            videoId: video.id,
++            order: i,
++            source: "GENERATED",
++            selected: i === 0,
++          },
++        });
++      }
+ 
+-      // Process topics ONE AT A TIME (sequentially) to respect YouTube's free tier rate limits
+-      // Our global sequential YouTube rate limiter only allows 1 search every 16 minutes, so parallel processing
+-      // would just cause extremely long waits in the queue. This way each topic waits its turn properly.
+-      for (const topic of syllabus.topics) {
+-        await processTopic(topic);
++      if (firstVideoId) {
++        await prisma.topic.update({
++          where: { id: createdTopic.id },
++          data: { selectedVideoId: firstVideoId },
++        });
+       }
++    };
+ 
+-      await prisma.learningPath.update({
+-        where: { id: path.id },
+-        data: { status: "READY" },
+-      });
+-      console.log("Learning path generation complete:", path.id);
+-    } catch (err) {
+-      console.error("Background path generation failed:", err);
+-      await prisma.learningPath.update({
+-        where: { id: path.id },
+-        data: { status: "FAILED" },
+-      });
++    // Process topics ONE AT A TIME (sequentially) to respect YouTube's free tier rate limits
++    // Our global sequential YouTube rate limiter only allows 1 search every 16 minutes, so parallel processing
++    // would just cause extremely long waits in the queue. This way each topic waits its turn properly.
++    for (const topic of syllabus.topics) {
++      await processTopic(topic);
+     }
+-  })();
+ 
+-  // Return immediately to the client, pass the promise to waitUntil() in API route
+-  return { pathId: path.id, processingPromise };
++    await prisma.learningPath.update({
++      where: { id: pathId },
++      data: { status: "READY" },
++    });
++    console.log("Learning path generation complete:", pathId);
++  } catch (err) {
++    console.error("Background path generation failed:", err);
++    await prisma.learningPath.update({
++      where: { id: pathId },
++      data: { status: "FAILED" },
++    });
++  }
++}
++
++/**
++ * Convenience wrapper for callers that don't need the two phases split
++ * apart (e.g. local dev without a queue). Runs both phases, returning the
++ * pathId immediately and a processingPromise for the slow phase so the
++ * caller can await it (or hand it to waitUntil()) without blocking the
++ * fast phase.
++ */
++export async function generatePath(
++  userId: string,
++  prompt: string
++): Promise<{ pathId: string; processingPromise: Promise<void> }> {
++  const { pathId, syllabus } = await createLearningPath(userId, prompt);
++  const processingPromise = processLearningPathTopics(pathId, syllabus);
++  return { pathId, processingPromise };
+ }
+\ No newline at end of file
+diff --git a/src/application/getPath.ts b/src/application/getPath.ts
+index ae644fc..1753fc5 100644
+--- a/src/application/getPath.ts
++++ b/src/application/getPath.ts
+@@ -1,6 +1,35 @@
+ import type { PathView, VideoSource } from "@/domain/types";
+ import { prisma } from "@/infrastructure/db/prisma";
+ 
++// Narrow shapes for the query result below, keyed to the fields we actually
++// read. Kept local (rather than relying on Prisma's generated payload types)
++// so this file type-checks the same whether or not `prisma generate` has run.
++interface VideoRow {
++  id: string;
++  youtubeVideoId: string;
++  title: string;
++  channelTitle: string;
++  thumbnailUrl: string;
++  durationSec: number;
++}
++interface TopicVideoRow {
++  videoId: string;
++  video: VideoRow;
++  selected: boolean;
++  source: string;
++}
++interface TopicRow {
++  id: string;
++  title: string;
++  order: number;
++  selectedVideoId: string | null;
++  topicVideos: TopicVideoRow[];
++}
++interface ProgressRow {
++  videoId: string;
++  watched: boolean;
++}
++
+ export async function getPath(pathId: string, userId: string): Promise<PathView | null> {
+   const path = await prisma.learningPath.findFirst({
+     where: { id: pathId, userId },
+@@ -19,11 +48,13 @@ export async function getPath(pathId: string, userId: string): Promise<PathView
+ 
+   if (!path) return null;
+ 
+-  const videoIds = path.topics.flatMap((t: any) => t.topicVideos.map((tv: any) => tv.videoId));
+-  const progressRows = await prisma.progress.findMany({
++  const topics = path.topics as unknown as TopicRow[];
++
++  const videoIds = topics.flatMap((t) => t.topicVideos.map((tv) => tv.videoId));
++  const progressRows = (await prisma.progress.findMany({
+     where: { userId, videoId: { in: videoIds } },
+-  });
+-  const watchedSet = new Set(progressRows.filter((p: any) => p.watched).map((p: any) => p.videoId));
++  })) as unknown as ProgressRow[];
++  const watchedSet = new Set(progressRows.filter((p) => p.watched).map((p) => p.videoId));
+ 
+   return {
+     id: path.id,
+@@ -31,12 +62,12 @@ export async function getPath(pathId: string, userId: string): Promise<PathView
+     title: path.title,
+     prompt: path.prompt,
+     status: path.status,
+-    topics: path.topics.map((t: any) => ({
++    topics: topics.map((t) => ({
+       id: t.id,
+       title: t.title,
+       order: t.order,
+       selectedVideoId: t.selectedVideoId,
+-      videos: t.topicVideos.map((tv: any) => ({
++      videos: t.topicVideos.map((tv) => ({
+         id: tv.video.id,
+         youtubeVideoId: tv.video.youtubeVideoId,
+         title: tv.video.title,
+diff --git a/src/application/getUserPaths.ts b/src/application/getUserPaths.ts
+index 86823f7..dde7524 100644
+--- a/src/application/getUserPaths.ts
++++ b/src/application/getUserPaths.ts
+@@ -1,6 +1,23 @@
+ import type { PathSummary } from "@/domain/types";
+ import { prisma } from "@/infrastructure/db/prisma";
+ 
++// Narrow shape for the query result below, keyed to the fields we actually
++// read — see getPath.ts for why this is local rather than Prisma-generated.
++interface PathRow {
++  id: string;
++  title: string;
++  prompt: string;
++  status: string;
++  createdAt: Date;
++  topics: {
++    topicVideos: {
++      video: {
++        progress: { watched: boolean }[];
++      };
++    }[];
++  }[];
++}
++
+ export async function getUserPaths(userId: string): Promise<PathSummary[]> {
+   const paths = await prisma.learningPath.findMany({
+     where: { userId },
+@@ -22,16 +39,16 @@ export async function getUserPaths(userId: string): Promise<PathSummary[]> {
+     },
+   });
+ 
+-  return paths.map((path: any) => {
+-    const videos = path.topics.flatMap((t: any) => t.topicVideos.map((tv: any) => tv.video));
++  return (paths as unknown as PathRow[]).map((path) => {
++    const videos = path.topics.flatMap((t) => t.topicVideos.map((tv) => tv.video));
+     const totalVideos = videos.length;
+-    const watchedVideos = videos.filter((v: any) => v.progress.some((p: any) => p.watched)).length;
++    const watchedVideos = videos.filter((v) => v.progress.some((p) => p.watched)).length;
+ 
+     return {
+       id: path.id,
+       title: path.title,
+       prompt: path.prompt,
+-      status: path.status,
++      status: path.status as PathSummary["status"],
+       createdAt: path.createdAt.toISOString(),
+       totalVideos,
+       watchedVideos,
+diff --git a/src/infrastructure/queues/pathGeneration.queue.ts b/src/infrastructure/queues/pathGeneration.queue.ts
+index 2183434..f8017ba 100644
+--- a/src/infrastructure/queues/pathGeneration.queue.ts
++++ b/src/infrastructure/queues/pathGeneration.queue.ts
+@@ -1,14 +1,7 @@
+-import { generatePath } from "@/application/generatePath";
++import { createLearningPath, processLearningPathTopics } from "@/application/generatePath";
++import type { Syllabus } from "@/domain/types";
+ import { Queue, Worker } from "bullmq";
+ 
+-// Define type for in-memory queue jobs first
+-interface InMemoryQueueJob {
+-  userId: string;
+-  prompt: string;
+-  resolve: () => void;
+-  reject: (error: Error) => void;
+-}
+-
+ // Create Upstash Redis connection for BullMQ (uses REDIS_URL format: redis://:<password>@<host>:port)
+ const getRedisConnection = () => {
+   const upstashRestUrl = process.env.UPSTASH_REDIS_REST_URL;
+@@ -61,13 +54,16 @@ if (redisConnection) {
+   // Create BullMQ queue for production (uses Upstash Redis)
+   pathGenerationQueue = new Queue("path-generation", { connection: redisConnection });
+   
+-  // Create worker to process jobs
++  // Create worker to process jobs. The fast phase (LLM call + Goal/LearningPath
++  // rows) has already run in queuePathGeneration() by the time a job reaches
++  // here — the worker only ever runs the slow phase (YouTube sourcing), and
++  // only once, using the syllabus we already generated rather than
++  // regenerating it.
+   pathGenerationWorker = new Worker(
+     "path-generation",
+     async (job) => {
+-      const { userId, prompt } = job.data;
+-      const { processingPromise } = await generatePath(userId, prompt);
+-      await processingPromise;
++      const { pathId, syllabus } = job.data as { pathId: string; syllabus: Syllabus };
++      await processLearningPathTopics(pathId, syllabus);
+       return { success: true };
+     },
+     { 
+@@ -83,24 +79,27 @@ if (redisConnection) {
+ 
+ // Helper function to add a new path generation job (uses either BullMQ or in-memory queue)
+ export async function queuePathGeneration(userId: string, prompt: string): Promise<{ jobId: string }> {
+-  // For BOTH environments: first create the path record in DB immediately,
+-  // then queue processing - this ensures frontend gets REAL database ID from the start
+-  const { pathId, processingPromise } = await generatePath(userId, prompt);
+-  
+-  // Case 1: Production with BullMQ + Upstash Redis (queue processing in background)
++  // Fast phase runs inline for BOTH environments: one Gemini call + two DB
++  // writes, so the frontend gets a real database ID right away.
++  const { pathId, syllabus } = await createLearningPath(userId, prompt);
++
++  // Case 1: Production with BullMQ + Upstash Redis — hand the slow phase
++  // (YouTube sourcing) to the worker so it runs exactly once, out of the
++  // request path.
+   if (pathGenerationQueue) {
+     // Check rate limit for this user before adding to queue
+     const userJobs = await pathGenerationQueue.getJobs(["active", "waiting"]);
+     const userRecentJobs = userJobs.filter(job => job.data.userId === userId);
+-    
++
+     if (userRecentJobs.length >= 5) {
+       throw new Error("RATE_LIMITED");
+     }
+ 
+-    // Add job to BullMQ queue to process in background
++    // Add job to BullMQ queue to process in background. Pass the syllabus we
++    // already generated so the worker doesn't call Gemini a second time.
+     await pathGenerationQueue.add(
+       "generate-path",
+-      { userId, prompt, pathId },
++      { userId, pathId, syllabus },
+       {
+         attempts: 3, // Retry failed jobs up to 3 times
+         backoff: {
+@@ -113,8 +112,11 @@ export async function queuePathGeneration(userId: string, prompt: string): Promi
+     );
+ 
+     return { jobId: pathId }; // Return real DB path ID, not BullMQ job ID
+-  } 
+-  
+-  // Case 2: Local development - path is already created and processing started, just return its ID
+-    return { jobId: pathId };
++  }
++
++  // Case 2: Local development — no Redis configured, so run the slow phase
++  // inline in the background (fire-and-forget; the path is already READY-
++  // pending in the DB and the frontend polls for status).
++  void processLearningPathTopics(pathId, syllabus);
++  return { jobId: pathId };
+ }
+\ No newline at end of file
+-- 
+2.43.0
+

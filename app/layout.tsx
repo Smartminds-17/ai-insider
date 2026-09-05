@@ -1,3 +1,4 @@
+import { Geist, Geist_Mono } from "geist/font/mono";
 import AuthProvider from "@/components/AuthProvider";
 import Header from "@/components/Header";
 import type { Metadata } from "next";
