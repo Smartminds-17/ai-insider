@@ -18,7 +18,7 @@
 body {
   background: var(--ink);
   color: var(--text);
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: var(--font-geist-sans), 'Inter', system-ui, sans-serif;
 }
 
 .font-display {
@@ -26,5 +26,5 @@ body {
 }
 
 .font-mono {
-  font-family: 'IBM Plex Mono', monospace;
+  font-family: var(--font-geist-mono), 'IBM Plex Mono', monospace;
 }
