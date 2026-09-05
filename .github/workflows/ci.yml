@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    # Build-time placeholders only — no real secrets here, and none are
+    # needed: `next build` doesn't open a DB connection (Prisma connects
+    # lazily on first query) or call the LLM/YouTube APIs at build time.
+    # Real credentials live in the deploy target's env var settings, not here.
+    env:
+      DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci_placeholder"
+      NEXTAUTH_URL: "http://localhost:3000"
+      NEXTAUTH_SECRET: "ci-placeholder-secret"
+      GOOGLE_CLIENT_ID: "ci-placeholder"
+      GOOGLE_CLIENT_SECRET: "ci-placeholder"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Cheapest checks first so a broken PR fails fast.
+      - name: Lint
+        run: npm run lint
+
+      # Needed before typecheck/build since @prisma/client is generated
+      # from schema.prisma, not shipped pre-built.
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Type check
+        run: npx tsc --noEmit
+
+      - name: Build
+        run: npm run build
