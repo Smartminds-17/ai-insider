@@ -1,13 +1,6 @@
-import { generatePath } from "@/application/generatePath";
+import { createLearningPath, processLearningPathTopics } from "@/application/generatePath";
+import type { Syllabus } from "@/domain/types";
 import { Queue, Worker } from "bullmq";
-
-// Define type for in-memory queue jobs first
-interface InMemoryQueueJob {
-  userId: string;
-  prompt: string;
-  resolve: () => void;
-  reject: (error: Error) => void;
-}
 
 // Create Upstash Redis connection for BullMQ (uses REDIS_URL format: redis://:<password>@<host>:port)
 const getRedisConnection = () => {
@@ -61,13 +54,16 @@ if (redisConnection) {
   // Create BullMQ queue for production (uses Upstash Redis)
   pathGenerationQueue = new Queue("path-generation", { connection: redisConnection });
   
-  // Create worker to process jobs
+  // Create worker to process jobs. The fast phase (LLM call + Goal/LearningPath
+  // rows) has already run in queuePathGeneration() by the time a job reaches
+  // here — the worker only ever runs the slow phase (YouTube sourcing), and
+  // only once, using the syllabus we already generated rather than
+  // regenerating it.
   pathGenerationWorker = new Worker(
     "path-generation",
     async (job) => {
-      const { userId, prompt } = job.data;
-      const { processingPromise } = await generatePath(userId, prompt);
-      await processingPromise;
+      const { pathId, syllabus } = job.data as { pathId: string; syllabus: Syllabus };
+      await processLearningPathTopics(pathId, syllabus);
       return { success: true };
     },
     { 
@@ -83,24 +79,27 @@ if (redisConnection) {
 
 // Helper function to add a new path generation job (uses either BullMQ or in-memory queue)
 export async function queuePathGeneration(userId: string, prompt: string): Promise<{ jobId: string }> {
-  // For BOTH environments: first create the path record in DB immediately,
-  // then queue processing - this ensures frontend gets REAL database ID from the start
-  const { pathId, processingPromise } = await generatePath(userId, prompt);
-  
-  // Case 1: Production with BullMQ + Upstash Redis (queue processing in background)
+  // Fast phase runs inline for BOTH environments: one Gemini call + two DB
+  // writes, so the frontend gets a real database ID right away.
+  const { pathId, syllabus } = await createLearningPath(userId, prompt);
+
+  // Case 1: Production with BullMQ + Upstash Redis — hand the slow phase
+  // (YouTube sourcing) to the worker so it runs exactly once, out of the
+  // request path.
   if (pathGenerationQueue) {
     // Check rate limit for this user before adding to queue
     const userJobs = await pathGenerationQueue.getJobs(["active", "waiting"]);
     const userRecentJobs = userJobs.filter(job => job.data.userId === userId);
-    
+
     if (userRecentJobs.length >= 5) {
       throw new Error("RATE_LIMITED");
     }
 
-    // Add job to BullMQ queue to process in background
+    // Add job to BullMQ queue to process in background. Pass the syllabus we
+    // already generated so the worker doesn't call Gemini a second time.
     await pathGenerationQueue.add(
       "generate-path",
-      { userId, prompt, pathId },
+      { userId, pathId, syllabus },
       {
         attempts: 3, // Retry failed jobs up to 3 times
         backoff: {
@@ -113,8 +112,11 @@ export async function queuePathGeneration(userId: string, prompt: string): Promi
     );
 
     return { jobId: pathId }; // Return real DB path ID, not BullMQ job ID
-  } 
-  
-  // Case 2: Local development - path is already created and processing started, just return its ID
-    return { jobId: pathId };
+  }
+
+  // Case 2: Local development — no Redis configured, so run the slow phase
+  // inline in the background (fire-and-forget; the path is already READY-
+  // pending in the DB and the frontend polls for status).
+  void processLearningPathTopics(pathId, syllabus);
+  return { jobId: pathId };
 }

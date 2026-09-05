@@ -1,6 +1,35 @@
 import type { PathView, VideoSource } from "@/domain/types";
 import { prisma } from "@/infrastructure/db/prisma";
 
+// Narrow shapes for the query result below, keyed to the fields we actually
+// read. Kept local (rather than relying on Prisma's generated payload types)
+// so this file type-checks the same whether or not `prisma generate` has run.
+interface VideoRow {
+  id: string;
+  youtubeVideoId: string;
+  title: string;
+  channelTitle: string;
+  thumbnailUrl: string;
+  durationSec: number;
+}
+interface TopicVideoRow {
+  videoId: string;
+  video: VideoRow;
+  selected: boolean;
+  source: string;
+}
+interface TopicRow {
+  id: string;
+  title: string;
+  order: number;
+  selectedVideoId: string | null;
+  topicVideos: TopicVideoRow[];
+}
+interface ProgressRow {
+  videoId: string;
+  watched: boolean;
+}
+
 export async function getPath(pathId: string, userId: string): Promise<PathView | null> {
   const path = await prisma.learningPath.findFirst({
     where: { id: pathId, userId },
@@ -19,11 +48,13 @@ export async function getPath(pathId: string, userId: string): Promise<PathView 
 
   if (!path) return null;
 
-  const videoIds = path.topics.flatMap((t: any) => t.topicVideos.map((tv: any) => tv.videoId));
-  const progressRows = await prisma.progress.findMany({
+  const topics = path.topics as unknown as TopicRow[];
+
+  const videoIds = topics.flatMap((t) => t.topicVideos.map((tv) => tv.videoId));
+  const progressRows = (await prisma.progress.findMany({
     where: { userId, videoId: { in: videoIds } },
-  });
-  const watchedSet = new Set(progressRows.filter((p: any) => p.watched).map((p: any) => p.videoId));
+  })) as unknown as ProgressRow[];
+  const watchedSet = new Set(progressRows.filter((p) => p.watched).map((p) => p.videoId));
 
   return {
     id: path.id,
@@ -31,12 +62,12 @@ export async function getPath(pathId: string, userId: string): Promise<PathView 
     title: path.title,
     prompt: path.prompt,
     status: path.status,
-    topics: path.topics.map((t: any) => ({
+    topics: topics.map((t) => ({
       id: t.id,
       title: t.title,
       order: t.order,
       selectedVideoId: t.selectedVideoId,
-      videos: t.topicVideos.map((tv: any) => ({
+      videos: t.topicVideos.map((tv) => ({
         id: tv.video.id,
         youtubeVideoId: tv.video.youtubeVideoId,
         title: tv.video.title,
