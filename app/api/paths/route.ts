@@ -5,10 +5,8 @@ import { Redis } from "@upstash/redis";
 import { NextRequest, NextResponse } from "next/server";
 
 const MAX_PROMPT_LENGTH = 300;
-// Rate limiting: 5 path generations per user per hour
 const RATE_LIMIT = 5;
-const RATE_WINDOW_SECONDS = 3600; // 1 hour in seconds (for Redis)
-const RATE_WINDOW_MS = 60 * 60 * 1000; // 1 hour in milliseconds (for in-memory)
+const RATE_WINDOW_SECONDS = 3600;
 
 // Initialize Upstash Redis only if credentials are valid
 const getRedis = () => {

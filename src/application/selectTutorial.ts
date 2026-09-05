@@ -1,13 +1,23 @@
 import { prisma } from "@/infrastructure/db/prisma";
 
+interface TopicVideoRow {
+  videoId: string;
+}
+
+interface TopicWithVideos {
+  topicVideos: TopicVideoRow[];
+}
+
 export async function selectTutorial(userId: string, topicId: string, videoId: string) {
-  const topic = await prisma.topic.findFirst({
+  const rawTopic = await prisma.topic.findFirst({
     where: { id: topicId, learningPath: { userId } },
     include: { topicVideos: true },
   });
-  if (!topic) return null;
+  if (!rawTopic) return null;
 
-  const belongs = topic.topicVideos.some((tv: any) => tv.videoId === videoId);
+  const topic = rawTopic as unknown as TopicWithVideos;
+
+  const belongs = topic.topicVideos.some((tv) => tv.videoId === videoId);
   if (!belongs) return null;
 
   await prisma.$transaction([

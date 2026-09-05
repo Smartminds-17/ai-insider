@@ -1,21 +1,35 @@
 import type { RankedVideo } from "@/domain/types";
 import { prisma } from "@/infrastructure/db/prisma";
 
+interface TopicVideoRow {
+  video: { youtubeVideoId: string };
+}
+
+interface TopicRow {
+  order: number;
+  topicVideos: TopicVideoRow[];
+}
+
 export async function addInspirationToPath(
   userId: string,
   pathId: string,
   video: RankedVideo
 ): Promise<{ added: boolean; reason?: string; topicId?: string }> {
-  const path = await prisma.learningPath.findFirst({
+  const rawPath = await prisma.learningPath.findFirst({
     where: { id: pathId, userId },
     include: {
       topics: { include: { topicVideos: { include: { video: true } } } },
     },
   });
-  if (!path) return { added: false, reason: "Path not found" };
+  if (!rawPath) return { added: false, reason: "Path not found" };
 
-  const already = path.topics.some((t: any) =>
-    t.topicVideos.some((tv: any) => tv.video.youtubeVideoId === video.youtubeVideoId)
+  const path = {
+    ...rawPath,
+    topics: rawPath.topics as unknown as TopicRow[],
+  };
+
+  const already = path.topics.some((t) =>
+    t.topicVideos.some((tv) => tv.video.youtubeVideoId === video.youtubeVideoId)
   );
   if (already) return { added: false, reason: "Already on this syllabus" };
 
@@ -40,7 +54,7 @@ export async function addInspirationToPath(
     },
   });
 
-  const nextOrder = path.topics.reduce((max: number, t: any) => Math.max(max, t.order), -1) + 1;
+  const nextOrder = path.topics.reduce((max: number, t) => Math.max(max, t.order), -1) + 1;
   const topic = await prisma.topic.create({
     data: {
       learningPathId: path.id,

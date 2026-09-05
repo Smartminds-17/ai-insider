@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useSession } from "next-auth/react";
 import SignInButton from "./SignInButton";
@@ -25,9 +26,11 @@ export default function Header() {
         ) : session?.user ? (
           <div className="flex items-center gap-3">
             {session.user.image && (
-              <img
+              <Image
                 src={session.user.image}
                 alt={session.user.name ?? "User"}
+                width={32}
+                height={32}
                 className="w-8 h-8 rounded-full"
               />
             )}

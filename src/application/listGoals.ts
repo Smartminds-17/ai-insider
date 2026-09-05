@@ -1,8 +1,35 @@
 import type { GoalStatus, GoalSummary, PathStatus } from "@/domain/types";
 import { prisma } from "@/infrastructure/db/prisma";
 
+interface TopicVideoRow {
+  videoId: string;
+}
+
+interface TopicRow {
+  topicVideos: TopicVideoRow[];
+}
+
+interface PathRow {
+  id: string;
+  status: string;
+  topics: TopicRow[];
+}
+
+interface GoalRow {
+  id: string;
+  title: string;
+  prompt: string;
+  status: string;
+  createdAt: Date;
+  paths: PathRow[];
+}
+
+interface ProgressRow {
+  videoId: string;
+}
+
 export async function listGoals(userId: string): Promise<GoalSummary[]> {
-  const goals = await prisma.goal.findMany({
+  const rawGoals = await prisma.goal.findMany({
     where: { userId },
     orderBy: { createdAt: "desc" },
     include: {
@@ -18,20 +45,22 @@ export async function listGoals(userId: string): Promise<GoalSummary[]> {
     },
   });
 
-  const videoIds = goals.flatMap((g: any) =>
-    g.paths.flatMap((p: any) => p.topics.flatMap((t: any) => t.topicVideos.map((tv: any) => tv.videoId)))
+  const goals = rawGoals as unknown as GoalRow[];
+
+  const videoIds = goals.flatMap((g) =>
+    g.paths.flatMap((p) => p.topics.flatMap((t) => t.topicVideos.map((tv) => tv.videoId)))
   );
   const progressRows = videoIds.length
-    ? await prisma.progress.findMany({
+    ? ((await prisma.progress.findMany({
         where: { userId, videoId: { in: videoIds }, watched: true },
-      })
+      })) as unknown as ProgressRow[])
     : [];
-  const watchedSet = new Set(progressRows.map((p: any) => p.videoId));
+  const watchedSet = new Set(progressRows.map((p) => p.videoId));
 
-  return goals.map((g: any) => {
+  return goals.map((g) => {
     const path = g.paths[0] ?? null;
     const allVideoIds = path
-      ? path.topics.flatMap((t: any) => t.topicVideos.map((tv: any) => tv.videoId))
+      ? path.topics.flatMap((t) => t.topicVideos.map((tv) => tv.videoId))
       : [];
     return {
       id: g.id,
@@ -42,7 +71,7 @@ export async function listGoals(userId: string): Promise<GoalSummary[]> {
       pathId: path?.id ?? null,
       pathStatus: (path?.status as PathStatus) ?? null,
       topicCount: path?.topics.length ?? 0,
-      watchedCount: allVideoIds.filter((id: any) => watchedSet.has(id)).length,
+      watchedCount: allVideoIds.filter((id) => watchedSet.has(id)).length,
       totalVideos: allVideoIds.length,
     };
   });

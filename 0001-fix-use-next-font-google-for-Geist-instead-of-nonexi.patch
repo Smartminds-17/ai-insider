@@ -1,0 +1,81 @@
+From febedb4e71252dbb860a89530e6c496e2afb2b66 Mon Sep 17 00:00:00 2001
+From: josephlyimo <josephlyimo201@gmail.com>
+Date: Sat, 5 Sep 2026 09:36:17 +0000
+Subject: [PATCH] fix: use next/font/google for Geist instead of nonexistent
+ geist package
+
+The previous commit imported from 'geist/font/mono', a package that isn't
+in package.json and doesn't exist as a dependency - this broke tsc.
+Geist ships as a built-in next/font/google font in Next.js 15+, so:
+
+- Import Geist and Geist_Mono from next/font/google in layout.tsx
+- Expose them as --font-geist-sans / --font-geist-mono CSS variables on
+  the html element
+- Wire body's font-family to the Geist Sans variable (falling back to
+  the existing Inter/system-ui stack) and .font-mono to Geist Mono
+
+Also removes the loose .patch file that got committed into the repo root
+alongside the previous commit.
+---
+ app/globals.css |  4 ++--
+ app/layout.tsx  | 14 ++++++++++++--
+ 2 files changed, 14 insertions(+), 4 deletions(-)
+
+diff --git a/app/globals.css b/app/globals.css
+index 9cb34be..7a02a7e 100644
+--- a/app/globals.css
++++ b/app/globals.css
+@@ -18,7 +18,7 @@
+ body {
+   background: var(--ink);
+   color: var(--text);
+-  font-family: 'Inter', system-ui, sans-serif;
++  font-family: var(--font-geist-sans), 'Inter', system-ui, sans-serif;
+ }
+ 
+ .font-display {
+@@ -26,5 +26,5 @@ body {
+ }
+ 
+ .font-mono {
+-  font-family: 'IBM Plex Mono', monospace;
++  font-family: var(--font-geist-mono), 'IBM Plex Mono', monospace;
+ }
+\ No newline at end of file
+diff --git a/app/layout.tsx b/app/layout.tsx
+index 830477b..4738784 100644
+--- a/app/layout.tsx
++++ b/app/layout.tsx
+@@ -1,9 +1,19 @@
+-import { Geist, Geist_Mono } from "geist/font/mono";
++import { Geist, Geist_Mono } from "next/font/google";
+ import AuthProvider from "@/components/AuthProvider";
+ import Header from "@/components/Header";
+ import type { Metadata } from "next";
+ import "./globals.css";
+ 
++const geistSans = Geist({
++  variable: "--font-geist-sans",
++  subsets: ["latin"],
++});
++
++const geistMono = Geist_Mono({
++  variable: "--font-geist-mono",
++  subsets: ["latin"],
++});
++
+ export const metadata: Metadata = {
+   title: "AI Insider — Learn anything from YouTube, in order",
+   description:
+@@ -16,7 +26,7 @@ export default function RootLayout({
+   children: React.ReactNode;
+ }>) {
+   return (
+-    <html lang="en" className="h-full antialiased">
++    <html lang="en" className={`h-full antialiased ${geistSans.variable} ${geistMono.variable}`}>
+       <body className="min-h-full flex flex-col">
+         <AuthProvider>
+           <Header />
+-- 
+2.43.0
+

@@ -167,8 +167,7 @@ export function clearYouTubeCache() {
 
 export async function searchVideosForTopic(
   topic: string,
-  maxResults = 12,
-  retries = 3
+  maxResults = 12
 ): Promise<CandidateVideo[]> {
   // Check cache first to avoid redundant API calls
   const cacheKey = `${topic}:${maxResults}`;

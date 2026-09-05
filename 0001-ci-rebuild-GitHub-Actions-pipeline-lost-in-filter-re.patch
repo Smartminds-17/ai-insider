@@ -1,0 +1,84 @@
+From 0b99087c6a65ee7721c979caf4f3321184b940c0 Mon Sep 17 00:00:00 2001
+From: josephlyimo <josephlyimo201@gmail.com>
+Date: Sat, 5 Sep 2026 10:07:53 +0000
+Subject: [PATCH 1/2] ci: rebuild GitHub Actions pipeline lost in filter-repo
+ rewrite
+
+The .github/workflows/ci.yml set up in an earlier pass no longer exists
+anywhere in history - collateral damage from the git filter-repo run used
+to strip the leaked .env file. Recreating it here:
+
+- lint -> prisma generate -> tsc --noEmit -> next build, cheapest checks
+  first so a broken PR fails fast
+- Uses placeholder env vars for build-time only (DATABASE_URL etc.) since
+  next build doesn't open a DB connection or call external APIs; real
+  secrets belong in the deploy target's env settings, not CI
+
+Note: this pipeline will currently fail on lint - there are 14 existing
+eslint errors in addInspiration.ts/listGoals.ts/selectTutorial.ts (all
+still-orphaned dead code) plus a react-hooks warning in RelatedRail.tsx.
+Needs a follow-up commit to go green.
+---
+ .github/workflows/ci.yml | 50 ++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 50 insertions(+)
+ create mode 100644 .github/workflows/ci.yml
+
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+new file mode 100644
+index 0000000..41f6af8
+--- /dev/null
++++ b/.github/workflows/ci.yml
+@@ -0,0 +1,50 @@
++name: CI
++
++on:
++  push:
++    branches: [main]
++  pull_request:
++    branches: [main]
++
++jobs:
++  build:
++    runs-on: ubuntu-latest
++
++    # Build-time placeholders only — no real secrets here, and none are
++    # needed: `next build` doesn't open a DB connection (Prisma connects
++    # lazily on first query) or call the LLM/YouTube APIs at build time.
++    # Real credentials live in the deploy target's env var settings, not here.
++    env:
++      DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci_placeholder"
++      NEXTAUTH_URL: "http://localhost:3000"
++      NEXTAUTH_SECRET: "ci-placeholder-secret"
++      GOOGLE_CLIENT_ID: "ci-placeholder"
++      GOOGLE_CLIENT_SECRET: "ci-placeholder"
++
++    steps:
++      - name: Checkout
++        uses: actions/checkout@v4
++
++      - name: Set up Node
++        uses: actions/setup-node@v4
++        with:
++          node-version: "22"
++          cache: "npm"
++
++      - name: Install dependencies
++        run: npm ci
++
++      # Cheapest checks first so a broken PR fails fast.
++      - name: Lint
++        run: npm run lint
++
++      # Needed before typecheck/build since @prisma/client is generated
++      # from schema.prisma, not shipped pre-built.
++      - name: Generate Prisma client
++        run: npx prisma generate
++
++      - name: Type check
++        run: npx tsc --noEmit
++
++      - name: Build
++        run: npm run build
+-- 
+2.43.0
+

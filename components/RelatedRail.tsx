@@ -11,15 +11,27 @@ interface RelatedRailProps {
 export default function RelatedRail({ field }: RelatedRailProps) {
   const [videos, setVideos] = useState<RankedVideo[]>([]);
   const [activeVideo, setActiveVideo] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loadedField, setLoadedField] = useState<string | null>(null);
+
+  const loading = loadedField !== field;
 
   useEffect(() => {
-    setLoading(true);
+    let cancelled = false;
     fetch(`/api/related?field=${encodeURIComponent(field)}`)
       .then((res) => res.json())
-      .then((json) => setVideos(json.data ?? []))
-      .catch(() => setVideos([]))
-      .finally(() => setLoading(false));
+      .then((json) => {
+        if (cancelled) return;
+        setVideos(json.data ?? []);
+        setLoadedField(field);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setVideos([]);
+        setLoadedField(field);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [field]);
 
   if (loading) return null;
