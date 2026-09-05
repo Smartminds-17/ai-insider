@@ -4,11 +4,6 @@ import { signIn, useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 
-function getCookie(name: string): string | null {
-  const match = document.cookie.match(new RegExp("(^| )" + name + "=([^;]+)"));
-  return match ? match[2] : null;
-}
-
 export default function LoginPage() {
   const { data: session, status } = useSession();
   const router = useRouter();
@@ -28,23 +23,9 @@ export default function LoginPage() {
   }
 
   const handleSignIn = async () => {
-    // Capture anonymous user ID before signing in
-    const anonUserId = getCookie("ai_insider_uid");
-
-    const result = await signIn("google", { callbackUrl: "/", redirect: false });
-
-    if (result?.ok && anonUserId) {
-      // Transfer anonymous data to the authenticated account
-      await fetch("/api/auth/migrate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ anonUserId }),
-      });
-      // Redirect after migration
-      window.location.href = "/";
-    } else if (result?.ok) {
-      window.location.href = "/";
-    }
+    // For OAuth providers like Google, NextAuth automatically handles redirect
+    // Migration happens server-side in NextAuth's events.signIn callback
+    await signIn("google", { callbackUrl: "/" });
   };
 
   return (

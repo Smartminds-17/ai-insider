@@ -154,9 +154,15 @@ export async function generateSyllabus(prompt: string): Promise<Syllabus> {
     try {
       result = await model.generateContent(prompt);
       break; // Success, exit loop
-    } catch (error: any) {
+    } catch (error: unknown) {
       attempt++;
-      if (error.status === 503 && attempt < maxRetries) {
+      if (
+        error && 
+        typeof error === 'object' && 
+        'status' in error && 
+        error.status === 503 && 
+        attempt < maxRetries
+      ) {
         const delay = Math.pow(2, attempt) * 1000; // Exponential backoff
         console.warn(`Gemini API unavailable (503). Retrying in ${delay / 1000}s... (Attempt ${attempt}/${maxRetries})`);
         await new Promise(resolve => setTimeout(resolve, delay));

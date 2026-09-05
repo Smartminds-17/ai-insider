@@ -1,5 +1,5 @@
-import { prisma } from "@/infrastructure/db/prisma";
 import type { PathSummary } from "@/domain/types";
+import { prisma } from "@/infrastructure/db/prisma";
 
 export async function getUserPaths(userId: string): Promise<PathSummary[]> {
   const paths = await prisma.learningPath.findMany({
@@ -22,10 +22,10 @@ export async function getUserPaths(userId: string): Promise<PathSummary[]> {
     },
   });
 
-  return paths.map((path) => {
-    const videos = path.topics.flatMap((t) => t.topicVideos.map((tv) => tv.video));
+  return paths.map((path: any) => {
+    const videos = path.topics.flatMap((t: any) => t.topicVideos.map((tv: any) => tv.video));
     const totalVideos = videos.length;
-    const watchedVideos = videos.filter((v) => v.progress.some((p) => p.watched)).length;
+    const watchedVideos = videos.filter((v: any) => v.progress.some((p: any) => p.watched)).length;
 
     return {
       id: path.id,

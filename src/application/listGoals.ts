@@ -1,5 +1,5 @@
-import { prisma } from "@/infrastructure/db/prisma";
 import type { GoalStatus, GoalSummary, PathStatus } from "@/domain/types";
+import { prisma } from "@/infrastructure/db/prisma";
 
 export async function listGoals(userId: string): Promise<GoalSummary[]> {
   const goals = await prisma.goal.findMany({
@@ -18,20 +18,20 @@ export async function listGoals(userId: string): Promise<GoalSummary[]> {
     },
   });
 
-  const videoIds = goals.flatMap((g) =>
-    g.paths.flatMap((p) => p.topics.flatMap((t) => t.topicVideos.map((tv) => tv.videoId)))
+  const videoIds = goals.flatMap((g: any) =>
+    g.paths.flatMap((p: any) => p.topics.flatMap((t: any) => t.topicVideos.map((tv: any) => tv.videoId)))
   );
   const progressRows = videoIds.length
     ? await prisma.progress.findMany({
         where: { userId, videoId: { in: videoIds }, watched: true },
       })
     : [];
-  const watchedSet = new Set(progressRows.map((p) => p.videoId));
+  const watchedSet = new Set(progressRows.map((p: any) => p.videoId));
 
-  return goals.map((g) => {
+  return goals.map((g: any) => {
     const path = g.paths[0] ?? null;
     const allVideoIds = path
-      ? path.topics.flatMap((t) => t.topicVideos.map((tv) => tv.videoId))
+      ? path.topics.flatMap((t: any) => t.topicVideos.map((tv: any) => tv.videoId))
       : [];
     return {
       id: g.id,
@@ -42,7 +42,7 @@ export async function listGoals(userId: string): Promise<GoalSummary[]> {
       pathId: path?.id ?? null,
       pathStatus: (path?.status as PathStatus) ?? null,
       topicCount: path?.topics.length ?? 0,
-      watchedCount: allVideoIds.filter((id) => watchedSet.has(id)).length,
+      watchedCount: allVideoIds.filter((id: any) => watchedSet.has(id)).length,
       totalVideos: allVideoIds.length,
     };
   });

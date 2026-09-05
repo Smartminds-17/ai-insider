@@ -7,7 +7,7 @@ export async function selectTutorial(userId: string, topicId: string, videoId: s
   });
   if (!topic) return null;
 
-  const belongs = topic.topicVideos.some((tv) => tv.videoId === videoId);
+  const belongs = topic.topicVideos.some((tv: any) => tv.videoId === videoId);
   if (!belongs) return null;
 
   await prisma.$transaction([

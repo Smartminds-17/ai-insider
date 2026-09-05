@@ -35,7 +35,6 @@ export default function PathRoadmap({ pathId }: PathRoadmapProps) {
       return;
     }
     const json = await res.json();
-    console.log("Fetched path data:", JSON.stringify(json.data, null, 2));
     setPath(json.data);
   }, [pathId]);
 

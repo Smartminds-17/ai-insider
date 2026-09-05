@@ -1,5 +1,5 @@
-import { prisma } from "@/infrastructure/db/prisma";
 import type { PathView, VideoSource } from "@/domain/types";
+import { prisma } from "@/infrastructure/db/prisma";
 
 export async function getPath(pathId: string, userId: string): Promise<PathView | null> {
   const path = await prisma.learningPath.findFirst({
@@ -19,11 +19,11 @@ export async function getPath(pathId: string, userId: string): Promise<PathView 
 
   if (!path) return null;
 
-  const videoIds = path.topics.flatMap((t) => t.topicVideos.map((tv) => tv.videoId));
+  const videoIds = path.topics.flatMap((t: any) => t.topicVideos.map((tv: any) => tv.videoId));
   const progressRows = await prisma.progress.findMany({
     where: { userId, videoId: { in: videoIds } },
   });
-  const watchedSet = new Set(progressRows.filter((p) => p.watched).map((p) => p.videoId));
+  const watchedSet = new Set(progressRows.filter((p: any) => p.watched).map((p: any) => p.videoId));
 
   return {
     id: path.id,
@@ -31,12 +31,12 @@ export async function getPath(pathId: string, userId: string): Promise<PathView 
     title: path.title,
     prompt: path.prompt,
     status: path.status,
-    topics: path.topics.map((t) => ({
+    topics: path.topics.map((t: any) => ({
       id: t.id,
       title: t.title,
       order: t.order,
       selectedVideoId: t.selectedVideoId,
-      videos: t.topicVideos.map((tv) => ({
+      videos: t.topicVideos.map((tv: any) => ({
         id: tv.video.id,
         youtubeVideoId: tv.video.youtubeVideoId,
         title: tv.video.title,
