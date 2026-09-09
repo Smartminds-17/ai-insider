@@ -69,7 +69,24 @@ classification, no real accounts, no payments. See the ranking heuristic in
 `src/infrastructure/youtube/rankVideos.ts` — it uses view count, duration
 fit, and recency, not transcript analysis, to keep API/LLM costs low for v1.
 
-## Production fixes & recent improvements (2024)
+# AI Insider
+## Changelog
+
+All notable changes to this project will be documented in this file.
+
+## [0.1.0] - 2026-09-05
+### Added
+- **Video player with automatic resume functionality**: Videos now save playback position and resume where users left off when returning to a path
+- **Automatic progress tracking**: Saves playback position every 5 seconds while watching, auto-marks videos as watched at >95% completion
+- **Database migration**: Added `positionSec` and `lastWatchedAt` columns to Progress model for resume tracking
+- **Rate limiting + logging for progress endpoint**: New `/api/progress` endpoint is production-ready with 300 requests/hour limits and structured JSON logging
+
+### Fixed
+- **Resolved browser console errors**: Replaced YouTube Player API with reliable postMessage API to fix `getCurrentTime is not a function` errors
+- **Single video playback**: Only one video plays at a time across the entire page to prevent audio overlap
+
+---
+## Previous production fixes (2024)
 
 We've implemented critical fixes to resolve concurrency, rate-limit, and performance issues that were causing mock data fallback, 404s, and slow auth:
 

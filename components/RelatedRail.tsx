@@ -47,7 +47,7 @@ export default function RelatedRail({ field }: RelatedRailProps) {
           <div className="mb-6">
             {videos.filter(v => v.youtubeVideoId === activeVideo).map((v) => (
               <div key={v.youtubeVideoId} className="bg-[var(--ink-2)] border border-white/10 rounded-lg p-3">
-                <VideoEmbed youtubeVideoId={v.youtubeVideoId} title={v.title} />
+                <VideoEmbed youtubeVideoId={v.youtubeVideoId} title={v.title} durationSec={v.durationSec} />
                 <p className="mt-3 text-sm font-medium">{v.title}</p>
                 <button 
                   onClick={() => setActiveVideo(null)}

@@ -7,3 +7,24 @@ export async function setVideoWatched(userId: string, videoId: string, watched: 
     create: { userId, videoId, watched, watchedAt: watched ? new Date() : null },
   });
 }
+
+// Update playback position (called every 5-10 seconds while video is playing)
+export async function updatePlaybackPosition(userId: string, videoId: string, positionSec: number) {
+  // Auto-mark as watched if user is >95% through the video
+  const videoDuration = await prisma.video.findUnique({
+    where: { id: videoId },
+    select: { durationSec: true }
+  });
+  const isWatched = videoDuration?.durationSec && positionSec > videoDuration.durationSec * 0.95;
+
+  await prisma.progress.upsert({
+    where: { userId_videoId: { userId, videoId } },
+    update: { 
+      positionSec,
+      lastWatchedAt: new Date(),
+      // Auto-set watched if user is almost finished
+      ...(isWatched && { watched: true, watchedAt: new Date() })
+    },
+    create: { userId, videoId, positionSec, lastWatchedAt: new Date(), watched: isWatched || false },
+  });
+}

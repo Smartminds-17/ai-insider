@@ -97,13 +97,15 @@ model TopicVideo {
 }
 
 model Progress {
-  id        String    @id @default(uuid())
-  userId    String
-  videoId   String
-  watched   Boolean   @default(false)
-  watchedAt DateTime?
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  video     Video     @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  id           String    @id @default(uuid())
+  userId       String
+  videoId      String
+  watched      Boolean   @default(false)
+  watchedAt    DateTime?
+  positionSec  Int       @default(0) // Track playback position to resume later
+  lastWatchedAt DateTime? // Last time the user was watching this video
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  video        Video     @relation(fields: [videoId], references: [id], onDelete: Cascade)
 
   @@unique([userId, videoId])
   @@index([userId])

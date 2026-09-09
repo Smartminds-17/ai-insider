@@ -1,7 +1,6 @@
 "use client";
 
 import type { PathView } from "@/domain/types";
-import VideoEmbed from "./VideoEmbed";
 
 interface TopicWaypointProps {
   topic: PathView["topics"][number];
@@ -9,6 +8,13 @@ interface TopicWaypointProps {
   onToggleWatched: (videoId: string, watched: boolean) => void;
   isExpanded: boolean;
   onToggle: () => void;
+  onSelectVideo: (video: {
+    youtubeVideoId: string;
+    title: string;
+    videoId: string;
+    durationSec: number;
+  }) => void;
+  activeVideoId: string | null;
 }
 
 function formatDuration(sec: number): string {
@@ -17,7 +23,7 @@ function formatDuration(sec: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-export default function TopicWaypoint({ topic, isLast, onToggleWatched, isExpanded, onToggle }: TopicWaypointProps) {
+export default function TopicWaypoint({ topic, isLast, onToggleWatched, isExpanded, onToggle, onSelectVideo, activeVideoId }: TopicWaypointProps) {
   const watchedCount = topic.videos.filter((v) => v.watched).length;
   const complete = topic.videos.length > 0 && watchedCount === topic.videos.length;
 
@@ -100,23 +106,32 @@ export default function TopicWaypoint({ topic, isLast, onToggleWatched, isExpand
       {isExpanded && (
         <div className="pb-8 space-y-4">
           {topic.videos.map((video) => (
-            <div key={video.id} className="bg-[var(--ink-2)] border border-white/10 rounded-lg p-3">
-              <VideoEmbed youtubeVideoId={video.youtubeVideoId} title={video.title} />
+            <div 
+              key={video.id} 
+              className={`bg-[var(--ink-2)] border rounded-lg p-3 cursor-pointer transition-all ${
+                activeVideoId === video.id 
+                  ? "border-[var(--route)] ring-1 ring-[var(--route)]" 
+                  : "border-white/10 hover:border-white/20"
+              }`}
+              onClick={() => onSelectVideo({
+                youtubeVideoId: video.youtubeVideoId,
+                title: video.title,
+                videoId: video.id,
+                durationSec: video.durationSec
+              })}
+            >
               <div className="mt-3 flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <a
-                    href={`https://www.youtube.com/watch?v=${video.youtubeVideoId}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-sm font-medium truncate block hover:text-[var(--route)] transition"
-                  >
+                  <p className={`text-sm font-medium truncate block transition ${
+                    activeVideoId === video.id ? "text-[var(--route)]" : "hover:text-[var(--route)]"
+                  }`}>
                     {video.title}
-                  </a>
+                  </p>
                   <p className="text-xs text-[var(--text-dim)] mt-0.5">
                     {video.channelTitle} · {formatDuration(video.durationSec)}
                   </p>
                 </div>
-                <label className="flex items-center gap-2 shrink-0 cursor-pointer select-none">
+                <label className="flex items-center gap-2 shrink-0 cursor-pointer select-none" onClick={(e) => e.stopPropagation()}>
                   <input
                     type="checkbox"
                     checked={video.watched}

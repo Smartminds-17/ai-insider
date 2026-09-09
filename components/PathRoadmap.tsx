@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import RelatedRail from "./RelatedRail";
 import TopicWaypoint from "./TopicWaypoint";
+import VideoEmbed from "./VideoEmbed";
 
 interface PathRoadmapProps {
   pathId: string;
@@ -16,6 +17,12 @@ export default function PathRoadmap({ pathId }: PathRoadmapProps) {
   const [notFound, setNotFound] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [expandedTopicIndex, setExpandedTopicIndex] = useState<number | null>(null);
+  const [activeVideo, setActiveVideo] = useState<{
+    youtubeVideoId: string;
+    title: string;
+    videoId: string;
+    durationSec: number;
+  } | null>(null);
 
   const handleToggleTopic = (index: number) => {
     setExpandedTopicIndex((prev) => (prev === index ? null : index));
@@ -115,9 +122,39 @@ export default function PathRoadmap({ pathId }: PathRoadmapProps) {
   const watchedVideos = path.topics.reduce((sum, t) => sum + t.videos.filter((v) => v.watched).length, 0);
   const pct = totalVideos > 0 ? Math.round((watchedVideos / totalVideos) * 100) : 0;
 
+  // Collect all videos from all topics to pass to TopicWaypoint
+  const allVideos = path?.topics.flatMap(topic => 
+    topic.videos.map(video => ({
+      ...video,
+      topicId: topic.id
+    }))
+  ) || [];
+
   return (
-    <main className="flex-1 px-6 py-16">
-      <div className="max-w-3xl mx-auto">
+    <main className="flex-1">
+      {/* Sticky Single Video Player - only shows when on a valid path page */}
+      {path && (
+        <div className="sticky top-0 z-50 bg-[var(--ink)] border-b border-white/10 px-6 py-4">
+          <div className="max-w-4xl mx-auto">
+            {activeVideo ? (
+              <div className="rounded-2xl overflow-hidden bg-black shadow-2xl">
+                <VideoEmbed 
+                  youtubeVideoId={activeVideo.youtubeVideoId}
+                  title={activeVideo.title}
+                  videoId={activeVideo.videoId}
+                  durationSec={activeVideo.durationSec}
+                />
+              </div>
+            ) : (
+              <div className="aspect-video w-full rounded-2xl bg-[var(--ink-2)] border border-white/10 flex items-center justify-center">
+                <p className="text-[var(--text-dim)] font-mono">Select a video from the syllabus below to start watching</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+      
+      <div className="max-w-3xl mx-auto px-6 py-16">
         <div className="flex flex-wrap items-center gap-2 mb-3">
           <span className="legend-label legend-label--route">
             {path.status === "GENERATING" ? "Charting route…" : `${pct}% complete`}
@@ -187,6 +224,8 @@ export default function PathRoadmap({ pathId }: PathRoadmapProps) {
               onToggleWatched={handleToggleWatched}
               isExpanded={expandedTopicIndex === i}
               onToggle={() => handleToggleTopic(i)}
+              onSelectVideo={setActiveVideo}
+              activeVideoId={activeVideo?.videoId || null}
             />
           ))}
         </div>
