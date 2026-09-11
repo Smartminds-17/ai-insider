@@ -2,30 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-// Add TypeScript definitions for YouTube API - must be at top to extend global Window
-declare global {
-  interface Window {
-    YT?: {
-      Player: new (element: HTMLElement, options: {
-          events: {
-            onReady: () => void;
-            onStateChange: (event: { data: number }) => void;
-          };
-        }) => {
-          seekTo: (seconds: number, allowSeekAhead: boolean) => void;
-          getCurrentTime: () => number;
-          pauseVideo: () => void;
-          destroy: () => void;
-        };
-      PlayerState: {
-        PLAYING: number;
-        PAUSED: number;
-        ENDED: number;
-      };
-    };
-    onYouTubeIframeAPIReady?: () => void;
-  }
-}
+
 
 // Per-browser (local) tracking of the active playing iframe - only ONE video plays per browser page
 let activePlayingIframe: HTMLIFrameElement | null = null;
@@ -403,22 +380,4 @@ export default function VideoEmbed({ youtubeVideoId, title, videoId, durationSec
       </div>
     </div>
   );
-}
-
-// Add TypeScript definitions for YouTube API
-interface Window {
-  YT?: {
-    Player: new (element: HTMLElement, options: unknown) => {
-      seekTo: (seconds: number, allowSeekAhead: boolean) => void;
-      getCurrentTime: () => number;
-      pauseVideo: () => void;
-      destroy: () => void;
-    };
-    PlayerState?: {
-      PLAYING: number;
-      PAUSED: number;
-      ENDED: number;
-    };
-  };
-  onYouTubeIframeAPIReady?: () => void;
 }

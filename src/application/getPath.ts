@@ -28,6 +28,8 @@ interface TopicRow {
 interface ProgressRow {
   videoId: string;
   watched: boolean;
+  watchedSeconds: number;
+  lastPositionSec: number;
 }
 
 // 1 hour TTL for anonymous user paths (deleted after refresh/navigate away)
@@ -74,6 +76,7 @@ export async function getPath(pathId: string, userId: string): Promise<PathView 
     where: { userId, videoId: { in: videoIds } },
   })) as unknown as ProgressRow[];
   const watchedSet = new Set(progressRows.filter((p) => p.watched).map((p) => p.videoId));
+  const progressByVideoId = new Map(progressRows.map((p) => [p.videoId, p]));
 
   return {
     id: path.id,
@@ -94,6 +97,8 @@ export async function getPath(pathId: string, userId: string): Promise<PathView 
         thumbnailUrl: tv.video.thumbnailUrl,
         durationSec: tv.video.durationSec,
         watched: watchedSet.has(tv.video.id),
+        watchedSeconds: progressByVideoId.get(tv.video.id)?.watchedSeconds ?? 0,
+        lastPositionSec: progressByVideoId.get(tv.video.id)?.lastPositionSec ?? 0,
         selected: tv.selected,
         source: tv.source as VideoSource,
       })),

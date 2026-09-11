@@ -2,40 +2,31 @@
 
 import type { PathView } from "@/domain/types";
 
+import { formatDuration } from "@/lib/formatDuration";
+
 interface TopicWaypointProps {
   topic: PathView["topics"][number];
   isLast: boolean;
   onToggleWatched: (videoId: string, watched: boolean) => void;
   isExpanded: boolean;
   onToggle: () => void;
-  onSelectVideo: (video: {
-    youtubeVideoId: string;
-    title: string;
-    videoId: string;
-    durationSec: number;
-  }) => void;
   activeVideoId: string | null;
+  onSelectVideo: (video: PathView["topics"][number]["videos"][number]) => void;
 }
 
-function formatDuration(sec: number): string {
-  const m = Math.floor(sec / 60);
-  const s = sec % 60;
-  return `${m}:${s.toString().padStart(2, "0")}`;
-}
-
-export default function TopicWaypoint({ topic, isLast, onToggleWatched, isExpanded, onToggle, onSelectVideo, activeVideoId }: TopicWaypointProps) {
+export default function TopicWaypoint({
+  topic,
+  isLast,
+  onToggleWatched,
+  isExpanded,
+  onToggle,
+  activeVideoId,
+  onSelectVideo,
+}: TopicWaypointProps) {
   const watchedCount = topic.videos.filter((v) => v.watched).length;
   const complete = topic.videos.length > 0 && watchedCount === topic.videos.length;
 
-  // Wrapper that calls parent's onToggle - this component doesn't control its own expansion!
   const handleClick = () => {
-    if (isExpanded) {
-      // If we're closing this topic, pause any playing video inside before unmounting it
-      const iframes = document.querySelectorAll<HTMLIFrameElement>('.topic-waypoint iframe');
-      iframes.forEach(iframe => {
-        iframe.contentWindow?.postMessage('{"event":"command","func":"pauseVideo","args":""}', '*');
-      });
-    }
     onToggle(); // Tell parent to update the single expanded topic
   };
 
@@ -104,45 +95,60 @@ export default function TopicWaypoint({ topic, isLast, onToggleWatched, isExpand
       </button>
 
       {isExpanded && (
-        <div className="pb-8 space-y-4">
-          {topic.videos.map((video) => (
-            <div 
-              key={video.id} 
-              className={`bg-[var(--ink-2)] border rounded-lg p-3 cursor-pointer transition-all ${
-                activeVideoId === video.id 
-                  ? "border-[var(--route)] ring-1 ring-[var(--route)]" 
-                  : "border-white/10 hover:border-white/20"
-              }`}
-              onClick={() => onSelectVideo({
-                youtubeVideoId: video.youtubeVideoId,
-                title: video.title,
-                videoId: video.id,
-                durationSec: video.durationSec
-              })}
-            >
-              <div className="mt-3 flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className={`text-sm font-medium truncate block transition ${
-                    activeVideoId === video.id ? "text-[var(--route)]" : "hover:text-[var(--route)]"
-                  }`}>
-                    {video.title}
-                  </p>
-                  <p className="text-xs text-[var(--text-dim)] mt-0.5">
-                    {video.channelTitle} · {formatDuration(video.durationSec)}
-                  </p>
-                </div>
-                <label className="flex items-center gap-2 shrink-0 cursor-pointer select-none" onClick={(e) => e.stopPropagation()}>
+        <div className="pb-8 space-y-2">
+          {topic.videos.map((video) => {
+            const isActive = video.id === activeVideoId;
+            return (
+              <div
+                key={video.id}
+                className="flex items-center gap-3 rounded-lg p-2 border transition"
+                style={{
+                  borderColor: isActive ? "var(--route)" : "rgba(255,255,255,0.1)",
+                  background: isActive ? "rgba(232,163,61,0.08)" : "var(--ink-2)",
+                  boxShadow: isActive ? "0 0 0 1px var(--route)" : "none",
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => onSelectVideo(video)}
+                  className="flex items-center gap-3 flex-1 min-w-0 text-left"
+                  aria-label={`Play ${video.title} in the player above`}
+                >
+                  <div className="w-24 h-16 rounded-md overflow-hidden bg-[var(--ink)] shrink-0 relative">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={video.thumbnailUrl} alt={video.title} className="w-full h-full object-cover" />
+                    <div className="absolute inset-0 flex items-center justify-center bg-black/20">
+                      <svg
+                        className="w-6 h-6 text-white drop-shadow"
+                        fill={isActive ? "var(--route)" : "currentColor"}
+                        viewBox="0 0 24 24"
+                      >
+                        <path d="M8 5v14l11-7z" />
+                      </svg>
+                    </div>
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium truncate">{video.title}</p>
+                    <p className="text-xs text-[var(--text-dim)] mt-0.5">
+                      {video.channelTitle} · {formatDuration(video.durationSec)}
+                      {video.lastPositionSec > 0 && !video.watched && (
+                        <> · resume at {formatDuration(video.lastPositionSec)}</>
+                      )}
+                    </p>
+                  </div>
+                </button>
+                <label className="flex items-center gap-2 shrink-0 cursor-pointer select-none pr-1">
                   <input
                     type="checkbox"
                     checked={video.watched}
                     onChange={(e) => onToggleWatched(video.id, e.target.checked)}
                     className="w-[18px] h-[18px] accent-[var(--route)]"
                   />
-                  <span className="text-xs font-mono text-[var(--text-dim)]">Watched</span>
+                  <span className="text-xs font-mono text-[var(--text-dim)] hidden sm:inline">Watched</span>
                 </label>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
       {!isExpanded && <div className="pb-6" />}

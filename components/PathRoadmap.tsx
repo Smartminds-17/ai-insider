@@ -5,11 +5,13 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import RelatedRail from "./RelatedRail";
 import TopicWaypoint from "./TopicWaypoint";
-import VideoEmbed from "./VideoEmbed";
+import { type ActiveVideo } from "./VideoPlayer";
 
 interface PathRoadmapProps {
   pathId: string;
 }
+
+type PathVideo = PathView["topics"][number]["videos"][number];
 
 export default function PathRoadmap({ pathId }: PathRoadmapProps) {
   const router = useRouter();
@@ -17,12 +19,22 @@ export default function PathRoadmap({ pathId }: PathRoadmapProps) {
   const [notFound, setNotFound] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [expandedTopicIndex, setExpandedTopicIndex] = useState<number | null>(null);
-  const [activeVideo, setActiveVideo] = useState<{
-    youtubeVideoId: string;
-    title: string;
-    videoId: string;
-    durationSec: number;
-  } | null>(null);
+  const [activeVideo, setActiveVideo] = useState<ActiveVideo | null>(null);
+
+  // GET /api/paths/[id] only ever returns a path owned by the requesting user
+  // (anonymous-cookie or signed-in) — see src/application/getPath.ts, which
+  // scopes the query by userId. So the player naturally only ever appears
+  // for someone who created this path; anyone else gets `notFound` below.
+  const handleSelectVideo = (video: PathVideo) => {
+    setActiveVideo({
+      id: video.id,
+      youtubeVideoId: video.youtubeVideoId,
+      title: video.title,
+      channelTitle: video.channelTitle,
+      durationSec: video.durationSec,
+      lastPositionSec: video.lastPositionSec,
+    });
+  };
 
   const handleToggleTopic = (index: number) => {
     setExpandedTopicIndex((prev) => (prev === index ? null : index));
@@ -131,30 +143,13 @@ export default function PathRoadmap({ pathId }: PathRoadmapProps) {
   ) || [];
 
   return (
-    <main className="flex-1">
-      {/* Sticky Single Video Player - only shows when on a valid path page */}
-      {path && (
-        <div className="sticky top-0 z-50 bg-[var(--ink)] border-b border-white/10 px-6 py-4">
-          <div className="max-w-4xl mx-auto">
-            {activeVideo ? (
-              <div className="rounded-2xl overflow-hidden bg-black shadow-2xl">
-                <VideoEmbed 
-                  youtubeVideoId={activeVideo.youtubeVideoId}
-                  title={activeVideo.title}
-                  videoId={activeVideo.videoId}
-                  durationSec={activeVideo.durationSec}
-                />
-              </div>
-            ) : (
-              <div className="aspect-video w-full rounded-2xl bg-[var(--ink-2)] border border-white/10 flex items-center justify-center">
-                <p className="text-[var(--text-dim)] font-mono">Select a video from the syllabus below to start watching</p>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-      
-      <div className="max-w-3xl mx-auto px-6 py-16">
+    <main className="flex-1 px-6 py-16">
+      {/* Single sticky player for the whole path — stays pinned to the top of the
+          viewport while the syllabus scrolls underneath it. Only rendered on this
+          path's own page, and this page 404s for anyone who isn't its owner. */}
+      {path.status === "READY" && <VideoPlayer video={activeVideo} />}
+
+      <div className="max-w-3xl mx-auto">
         <div className="flex flex-wrap items-center gap-2 mb-3">
           <span className="legend-label legend-label--route">
             {path.status === "GENERATING" ? "Charting route…" : `${pct}% complete`}
@@ -224,8 +219,8 @@ export default function PathRoadmap({ pathId }: PathRoadmapProps) {
               onToggleWatched={handleToggleWatched}
               isExpanded={expandedTopicIndex === i}
               onToggle={() => handleToggleTopic(i)}
-              onSelectVideo={setActiveVideo}
-              activeVideoId={activeVideo?.videoId || null}
+              activeVideoId={activeVideo?.id ?? null}
+              onSelectVideo={handleSelectVideo}
             />
           ))}
         </div>

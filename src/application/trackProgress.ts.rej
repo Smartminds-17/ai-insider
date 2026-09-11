@@ -1,0 +1,44 @@
+diff a/src/application/trackProgress.ts b/src/application/trackProgress.ts	(rejected hunks)
+@@ -7,3 +7,42 @@ export async function setVideoWatched(userId: string, videoId: string, watched:
+     create: { userId, videoId, watched, watchedAt: watched ? new Date() : null },
+   });
+ }
++
++// Called repeatedly (every ~10s of playback, plus on pause/unmount) by the
++// player, not just once at the end — this is what makes tracking "streaming"
++// rather than a single write when a video finishes.
++// - deltaSeconds: seconds of actual playback to add since the last call
++// - positionSec: the current playhead, so we can resume where the user left off
++// - durationSec: used to auto-mark a video watched once the user nears the end
++export async function updateVideoProgress(
++  userId: string,
++  videoId: string,
++  { deltaSeconds, positionSec, durationSec }: { deltaSeconds: number; positionSec: number; durationSec?: number }
++) {
++  const existing = await prisma.progress.findUnique({
++    where: { userId_videoId: { userId, videoId } },
++    select: { watchedSeconds: true },
++  });
++
++  const nextWatchedSeconds = Math.max(0, (existing?.watchedSeconds ?? 0) + Math.max(0, deltaSeconds));
++  const autoComplete = durationSec ? positionSec >= durationSec * 0.9 : false;
++
++  await prisma.progress.upsert({
++    where: { userId_videoId: { userId, videoId } },
++    update: {
++      watchedSeconds: nextWatchedSeconds,
++      lastPositionSec: Math.max(0, Math.floor(positionSec)),
++      ...(autoComplete && { watched: true, watchedAt: new Date() }),
++    },
++    create: {
++      userId,
++      videoId,
++      watchedSeconds: nextWatchedSeconds,
++      lastPositionSec: Math.max(0, Math.floor(positionSec)),
++      watched: autoComplete,
++      watchedAt: autoComplete ? new Date() : null,
++    },
++  });
++
++  return { watchedSeconds: nextWatchedSeconds, watched: autoComplete };
++}

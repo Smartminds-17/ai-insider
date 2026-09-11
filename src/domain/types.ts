@@ -62,6 +62,8 @@ export interface PathView {
       thumbnailUrl: string;
       durationSec: number;
       watched: boolean;
+      watchedSeconds: number;
+      lastPositionSec: number;
       selected: boolean;
       source: VideoSource;
     }[];

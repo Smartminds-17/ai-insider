@@ -1,62 +1,45 @@
-import { setVideoWatched, updatePlaybackPosition } from "@/application/trackProgress";
-import { getOrCreateUserId } from "@/infrastructure/auth/getOrCreateUserId";
-import { prisma } from "@/infrastructure/db/prisma";
-import { rateLimit, rateLimits } from "@/infrastructure/rate-limit";
 import { NextRequest, NextResponse } from "next/server";
-
-// Simple structured logger for progress events
-const logProgressEvent = (event: string, data: Record<string, unknown>) => {
-  console.log(JSON.stringify({
-    timestamp: new Date().toISOString(),
-    service: "video-progress",
-    event,
-    ...data
-  }));
-};
+import { getOrCreateUserId } from "@/infrastructure/auth/getOrCreateUserId";
+import { setVideoWatched, updateVideoProgress } from "@/application/trackProgress";
 
 export async function POST(req: NextRequest) {
-  // Apply rate limiting - 300 requests/hour matches general API limits, which is more than enough for 5s updates
-  const { success, remaining } = await rateLimit(req, rateLimits.api);
-  if (!success) {
-    logProgressEvent("rate_limited", { path: req.nextUrl.pathname });
-    return NextResponse.json(
-      { data: null, meta: {}, error: { code: "RATE_LIMITED", message: "Too many requests. Please try again later." } },
-      { status: 429 }
-    );
-  }
-
   const body = await req.json().catch(() => null);
   const videoId = typeof body?.videoId === "string" ? body.videoId : null;
-  const watched = typeof body?.watched === "boolean" ? body.watched : null;
-  const positionSec = typeof body?.positionSec === "number" ? body.positionSec : null;
 
-  const userId = await getOrCreateUserId();
-
-  // Handle playback position update (most frequent call from video player)
-  if (videoId && positionSec !== null) {
-    try {
-      await updatePlaybackPosition(userId, videoId, positionSec);
-      logProgressEvent("position_updated", { userId, videoId, positionSec, remainingRequests: remaining });
-      return NextResponse.json({ data: { videoId, positionSec }, meta: {}, error: null });
-    } catch (err) {
-      logProgressEvent("position_update_failed", { userId, videoId, error: err });
-      return NextResponse.json(
-        { data: null, meta: {}, error: { code: "UPDATE_FAILED", message: "Failed to save playback position" } },
-        { status: 500 }
-      );
-    }
-  }
-
-  // Handle full watched toggle (when user marks video as complete)
-  if (!videoId || watched === null) {
+  if (!videoId) {
     return NextResponse.json(
-      { data: null, meta: {}, error: { code: "INVALID_INPUT", message: "videoId + (watched or positionSec) are required" } },
+      { data: null, meta: {}, error: { code: "INVALID_INPUT", message: "videoId is required" } },
       { status: 400 }
     );
   }
 
-  await setVideoWatched(userId, videoId, watched);
-  return NextResponse.json({ data: { videoId, watched }, meta: {}, error: null });
+  const userId = await getOrCreateUserId();
+
+  // Manual "mark as watched" checkbox toggle (unchanged behavior).
+  if (typeof body?.watched === "boolean") {
+    await setVideoWatched(userId, videoId, body.watched);
+    return NextResponse.json({ data: { videoId, watched: body.watched }, meta: {}, error: null });
+  }
+
+  // Streaming update sent periodically by the player while a video plays.
+  const deltaSeconds = typeof body?.deltaSeconds === "number" ? body.deltaSeconds : null;
+  const positionSec = typeof body?.positionSec === "number" ? body.positionSec : null;
+  const durationSec = typeof body?.durationSec === "number" ? body.durationSec : undefined;
+
+  if (deltaSeconds === null || positionSec === null) {
+    return NextResponse.json(
+      {
+        data: null,
+        meta: {},
+        error: { code: "INVALID_INPUT", message: "Provide either watched, or deltaSeconds + positionSec" },
+      },
+      { status: 400 }
+    );
+  }
+
+  const result = await updateVideoProgress(userId, videoId, { deltaSeconds, positionSec, durationSec });
+
+  return NextResponse.json({ data: { videoId, ...result, lastPositionSec: positionSec }, meta: {}, error: null });
 }
 
 // GET endpoint to fetch current playback progress for a video

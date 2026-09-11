@@ -1,0 +1,24 @@
+diff a/components/VideoEmbed.tsx b/components/VideoEmbed.tsx	(rejected hunks)
+@@ -2,22 +2,6 @@
+ 
+ import { useEffect, useRef } from "react";
+ 
+-// Extend Window type to include YouTube API types that TypeScript doesn't know about
+-declare global {
+-  interface Window {
+-    YT?: {
+-      Player: new (element: HTMLElement, options: unknown) => {
+-        pauseVideo: () => void;
+-        destroy: () => void;
+-      };
+-      PlayerState?: {
+-        PLAYING: number;
+-      };
+-    };
+-    onYouTubeIframeAPIReady?: () => void;
+-  }
+-}
+-
+ interface VideoEmbedProps {
+   youtubeVideoId: string;
+   title: string;
