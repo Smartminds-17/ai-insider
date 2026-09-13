@@ -1,6 +1,8 @@
-import { NextRequest, NextResponse } from "next/server";
+import { setVideoWatched, updatePlaybackPosition } from "@/application/trackProgress";
 import { getOrCreateUserId } from "@/infrastructure/auth/getOrCreateUserId";
-import { setVideoWatched, updateVideoProgress } from "@/application/trackProgress";
+import { prisma } from "@/infrastructure/db/prisma";
+import { rateLimit, rateLimits } from "@/infrastructure/rate-limit";
+import { NextRequest, NextResponse } from "next/server";
 
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => null);
@@ -37,9 +39,9 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const result = await updateVideoProgress(userId, videoId, { deltaSeconds, positionSec, durationSec });
+  const result = await updatePlaybackPosition(userId, videoId, positionSec);
 
-  return NextResponse.json({ data: { videoId, ...result, lastPositionSec: positionSec }, meta: {}, error: null });
+  return NextResponse.json({ data: { videoId, lastPositionSec: positionSec }, meta: {}, error: null });
 }
 
 // GET endpoint to fetch current playback progress for a video
@@ -47,7 +49,6 @@ export async function GET(req: NextRequest) {
   // Apply rate limiting - 300 requests/hour matches general API limits
   const { success, remaining } = await rateLimit(req, rateLimits.api);
   if (!success) {
-    logProgressEvent("rate_limited", { path: req.nextUrl.pathname, method: "GET" });
     return NextResponse.json(
       { data: null, meta: {}, error: { code: "RATE_LIMITED", message: "Too many requests. Please try again later." } },
       { status: 429 }
@@ -57,7 +58,6 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const videoId = searchParams.get("videoId");
   if (!videoId) {
-    logProgressEvent("missing_video_id", { path: req.nextUrl.pathname, method: "GET" });
     return NextResponse.json(
       { data: null, meta: {}, error: { code: "MISSING_VIDEO_ID", message: "videoId query param is required" } },
       { status: 400 }
@@ -71,14 +71,12 @@ export async function GET(req: NextRequest) {
       select: { positionSec: true, watched: true, lastWatchedAt: true }
     });
 
-    logProgressEvent("progress_fetched", { userId, videoId, positionSec: progress?.positionSec || 0, remainingRequests: remaining });
     return NextResponse.json({ 
       data: progress || { positionSec: 0, watched: false, lastWatchedAt: null }, 
       meta: {}, 
       error: null 
     });
   } catch (err) {
-    logProgressEvent("progress_fetch_failed", { userId, videoId, error: err });
     return NextResponse.json(
       { data: null, meta: {}, error: { code: "FETCH_FAILED", message: "Failed to load playback progress" } },
       { status: 500 }

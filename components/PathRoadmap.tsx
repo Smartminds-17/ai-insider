@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import RelatedRail from "./RelatedRail";
 import TopicWaypoint from "./TopicWaypoint";
-import { type ActiveVideo } from "./VideoPlayer";
+import VideoPlayer, { type ActiveVideo } from "./VideoPlayer";
 
 interface PathRoadmapProps {
   pathId: string;
