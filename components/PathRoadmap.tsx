@@ -134,16 +134,29 @@ export default function PathRoadmap({ pathId }: PathRoadmapProps) {
   const watchedVideos = path.topics.reduce((sum, t) => sum + t.videos.filter((v) => v.watched).length, 0);
   const pct = totalVideos > 0 ? Math.round((watchedVideos / totalVideos) * 100) : 0;
 
-  // Collect all videos from all topics to pass to TopicWaypoint
-  const allVideos = path?.topics.flatMap(topic => 
-    topic.videos.map(video => ({
-      ...video,
-      topicId: topic.id
-    }))
-  ) || [];
+  // Find the most recently-watched video, if any, to power the hero
+  const allVideos = path.topics.flatMap((topic) => topic.videos);
+  const lastWatchedVideo = allVideos.reduce((last, video) => {
+    if (!last) return video;
+    if (!video.lastPositionSec) return last;
+    if (!last.lastPositionSec || video.lastPositionSec > last.lastPositionSec) {
+      return video;
+    }
+    return last;
+  }, null as PathVideo | null);
 
   return (
     <main className="flex-1 px-6 py-16">
+      {/* A "continue watching" hero card that picks up the most-recently-viewed
+          video. This is separate from the active video selection, which follows
+          the user's clicks inside the syllabus below. */}
+      {lastWatchedVideo && (
+        <div className="max-w-3xl mx-auto mb-12">
+          <p className="legend-label legend-label--ink mb-3">Continue watching</p>
+          <VideoPlayer video={lastWatchedVideo} />
+        </div>
+      )}
+
       {/* Single sticky player for the whole path — stays pinned to the top of the
           viewport while the syllabus scrolls underneath it. Only rendered on this
           path's own page, and this page 404s for anyone who isn't its owner. */}
