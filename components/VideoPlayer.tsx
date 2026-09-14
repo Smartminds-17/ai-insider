@@ -19,7 +19,7 @@ interface VideoPlayerProps {
 
 let ytApiLoadPromise: Promise<void> | null = null;
 function loadYouTubeApi(): Promise<void> {
-  if (window.YT?.Player) return Promise.resolve();
+  if (typeof window.YT?.Player === 'function') return Promise.resolve();
   if (ytApiLoadPromise) return ytApiLoadPromise;
 
   ytApiLoadPromise = new Promise((resolve) => {
@@ -94,7 +94,7 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
       if (cancelled || !window.YT || !mountRef.current) return;
 
       playerRef.current?.destroy();
-      playerRef.current = new window.YT.Player(mountRef.current, {
+      const player = new window.YT.Player(mountRef.current, {
         videoId: video.youtubeVideoId,
         playerVars: {
           // Strip YouTube's native chrome — our own control bar replaces all of it.
@@ -110,6 +110,7 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
         events: {
           onReady: (e) => {
             if (cancelled) return;
+            playerRef.current = e.target;
             setReady(true);
             setDuration(e.target.getDuration() || video.durationSec || 0);
             if (video.lastPositionSec > 5) {

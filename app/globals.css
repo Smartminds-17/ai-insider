@@ -24,20 +24,20 @@
 body {
   background: var(--ink);
   color: var(--text);
-  font-family: var(--font-geist-sans), 'Inter', system-ui, sans-serif;
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
 }
 
 .font-display {
-  font-family: 'Space Grotesk', system-ui, sans-serif;
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
 }
 
 .font-mono {
-  font-family: var(--font-geist-mono), 'IBM Plex Mono', monospace;
+  font-family: var(--font-geist-mono), monospace;
 }
 
 /* ─── LEGEND LABEL ─── the "map legend" mono chip used everywhere ───────── */
 .legend-label {
-  font-family: var(--font-geist-mono), 'IBM Plex Mono', monospace;
+  font-family: var(--font-geist-mono), monospace;
   font-size: 10px;
   letter-spacing: 0.22em;
   text-transform: uppercase;
@@ -88,7 +88,7 @@ body {
   gap: 6px;
   padding: 4px 10px;
   border-radius: 999px;
-  font-family: var(--font-geist-mono), 'IBM Plex Mono', monospace;
+  font-family: var(--font-geist-mono), monospace;
   font-size: 11px;
   letter-spacing: 0.08em;
   border: 1px solid transparent;
@@ -136,7 +136,7 @@ body {
   gap: 8px;
   padding: 10px 16px;
   border-radius: 10px;
-  font-family: 'Space Grotesk', system-ui, sans-serif;
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
   font-size: 14px;
   font-weight: 500;
   transition: filter 0.18s ease, background 0.18s ease, border-color 0.18s ease, transform 0.08s ease;

@@ -1,0 +1,255 @@
+From 68e741c60b6fa475ab02dd3693ef06767f35e0d7 Mon Sep 17 00:00:00 2001
+From: Claude <claude@anthropic.com>
+Date: Mon, 14 Sep 2026 10:20:35 +0000
+Subject: [PATCH] feat: add continue-watching hero to path page
+
+Based on Figma frame 2019:85 (web-app-ui). Adapted from the raw
+px/hex export onto the project's existing design tokens
+(--ink, --route, .chip, .surface-card) and a responsive layout
+instead of fixed absolute positioning.
+
+- New PathHero component: progress pills, path title, and a
+  spotlighted 'continue watching' video card
+- Continue video = topic's selected video, preferring one already
+  in progress (has a saved resume position) over the next
+  unwatched one in topic order
+- Reuses the VideoEmbed resume/progress-reporting work already in
+  place, so the hero picks up exactly where TopicWaypoint would
+- Additive: sits above the existing waypoint list, doesn't
+  replace it
+---
+ components/PathHero.tsx    | 112 +++++++++++++++++++++++++++++++++++++
+ components/PathRoadmap.tsx |  78 +++++++++++++++-----------
+ 2 files changed, 158 insertions(+), 32 deletions(-)
+ create mode 100644 components/PathHero.tsx
+
+diff --git a/components/PathHero.tsx b/components/PathHero.tsx
+new file mode 100644
+index 0000000..e1123d1
+--- /dev/null
++++ b/components/PathHero.tsx
+@@ -0,0 +1,112 @@
++"use client";
++
++import type { PathView } from "@/domain/types";
++import VideoEmbed from "./VideoEmbed";
++
++interface ContinueVideo {
++  id: string;
++  title: string;
++  youtubeVideoId: string;
++  lastPositionSec: number;
++  topicTitle: string;
++}
++
++interface PathHeroProps {
++  path: PathView;
++  continueVideo: ContinueVideo | null;
++  progressLabel: string;
++  pct: number;
++  totalVideos: number;
++  onToggleWatched: (videoId: string, watched: boolean) => void;
++  onProgress: (videoId: string, positionSec: number) => void;
++}
++
++function formatDuration(sec: number): string {
++  const m = Math.floor(sec / 60);
++  const s = Math.floor(sec % 60);
++  return `${m}:${s.toString().padStart(2, "0")}`;
++}
++
++// "Continue watching" hero — sits above the waypoint list, spotlighting the
++// next (or in-progress) video so returning users don't have to hunt through
++// the trail for where they left off. Based on Figma frame 2019:85, adapted
++// from its fixed-px/raw-hex export onto the project's existing token set
++// (--ink, --route, .chip, .surface-card) and a responsive layout.
++export default function PathHero({
++  path,
++  continueVideo,
++  progressLabel,
++  pct,
++  totalVideos,
++  onToggleWatched,
++  onProgress,
++}: PathHeroProps) {
++  return (
++    <div className="mb-10">
++      <div className="flex flex-wrap items-center justify-center gap-2 mb-4">
++        <span className="chip chip--route">{progressLabel}</span>
++        <span className="chip chip--ink">
++          <span className="chip__dot" />
++          {path.topics.length} stops · {totalVideos} videos
++        </span>
++      </div>
++
++      <h1 className="font-display text-2xl sm:text-3xl font-medium text-center mb-6 px-4">
++        {path.title}
++      </h1>
++
++      {continueVideo ? (
++        <div className="surface-card p-3 sm:p-4 max-w-3xl mx-auto">
++          <div className="aspect-video w-full overflow-hidden rounded-[10px] bg-black">
++            <VideoEmbed
++              youtubeVideoId={continueVideo.youtubeVideoId}
++              title={continueVideo.title}
++              initialPositionSec={continueVideo.lastPositionSec}
++              onProgress={(sec) => onProgress(continueVideo.id, sec)}
++            />
++          </div>
++
++          <div className="flex items-center justify-between gap-3 mt-3 flex-wrap">
++            <div className="min-w-0">
++              <p className="legend-label legend-label--dim mb-1">
++                {continueVideo.lastPositionSec > 5
++                  ? `Resuming from ${formatDuration(continueVideo.lastPositionSec)}`
++                  : "Up next"}
++                {" · "}
++                {continueVideo.topicTitle}
++              </p>
++              <p className="text-sm text-[var(--text)] truncate">{continueVideo.title}</p>
++            </div>
++            <button
++              type="button"
++              onClick={() => onToggleWatched(continueVideo.id, true)}
++              className="chip chip--sage shrink-0"
++            >
++              Mark watched
++            </button>
++          </div>
++
++          <div className="h-1.5 rounded-full bg-[var(--ink-3)] mt-4 overflow-hidden">
++            <div
++              className="h-full rounded-full bg-[var(--route)] transition-[width] duration-300"
++              style={{ width: `${pct}%` }}
++              role="progressbar"
++              aria-valuenow={pct}
++              aria-valuemin={0}
++              aria-valuemax={100}
++              aria-label="Overall route progress"
++            />
++          </div>
++        </div>
++      ) : (
++        <div className="surface-card p-6 text-center max-w-3xl mx-auto">
++          <p className="text-sm text-[var(--text-dim)]">
++            {totalVideos === 0
++              ? "Videos are being sourced for this route."
++              : "You've watched every video on this route. Nice work."}
++          </p>
++        </div>
++      )}
++    </div>
++  );
++}
+diff --git a/components/PathRoadmap.tsx b/components/PathRoadmap.tsx
+index 193eb0a..cd2f342 100644
+--- a/components/PathRoadmap.tsx
++++ b/components/PathRoadmap.tsx
+@@ -3,6 +3,7 @@
+ import type { PathView } from "@/domain/types";
+ import { useRouter } from "next/navigation";
+ import { useCallback, useEffect, useState } from "react";
++import PathHero from "./PathHero";
+ import RelatedRail from "./RelatedRail";
+ import TopicWaypoint from "./TopicWaypoint";
+ 
+@@ -125,51 +126,64 @@ export default function PathRoadmap({ pathId }: PathRoadmapProps) {
+   const totalVideos = path.topics.reduce((sum, t) => sum + t.videos.length, 0);
+   const watchedVideos = path.topics.reduce((sum, t) => sum + t.videos.filter((v) => v.watched).length, 0);
+   const pct = totalVideos > 0 ? Math.round((watchedVideos / totalVideos) * 100) : 0;
++  const progressLabel = path.status === "GENERATING" ? "Charting route…" : `${pct}% complete`;
++
++  // The "primary" video per topic is the one the ranking picked (selectedVideoId),
++  // falling back to the first candidate if that's somehow unset. The hero
++  // spotlights whichever of those is next: prefer one already in progress
++  // (has a saved resume position) over the next unwatched one in order.
++  const primaryVideos = path.topics
++    .slice()
++    .sort((a, b) => a.order - b.order)
++    .map((t) => {
++      const v = t.videos.find((video) => video.id === t.selectedVideoId) ?? t.videos[0];
++      return v ? { ...v, topicTitle: t.title } : null;
++    })
++    .filter((v): v is NonNullable<typeof v> => v !== null);
++
++  const continueVideo =
++    primaryVideos.find((v) => !v.watched && v.lastPositionSec > 5) ??
++    primaryVideos.find((v) => !v.watched) ??
++    null;
+ 
+   return (
+     <main className="flex-1 px-6 py-16">
+       <div className="max-w-3xl mx-auto">
+-        <div className="flex flex-wrap items-center gap-2 mb-3">
+-          <span className="legend-label legend-label--route">
+-            {path.status === "GENERATING" ? "Charting route…" : `${pct}% complete`}
+-          </span>
+-          <span className="text-[var(--ink-4)]">·</span>
+-          <span className="chip chip--ink">
+-            <span className="chip__dot" />
+-            {path.topics.length} stops · {totalVideos} videos
+-          </span>
++        <PathHero
++          path={path}
++          continueVideo={continueVideo}
++          progressLabel={progressLabel}
++          pct={pct}
++          totalVideos={totalVideos}
++          onToggleWatched={handleToggleWatched}
++          onProgress={handleProgress}
++        />
++
++        <div className="flex items-center justify-center gap-2 mb-10 flex-wrap">
+           {path.status === "READY" && (
+             <button type="button" className="chip chip--sage" aria-label="Share progress to trail log">
+               <span className="chip__dot" />
+               Log to trail log
+             </button>
+           )}
+-        </div>
+-
+-        <div className="flex items-start justify-between gap-4 mb-10 flex-wrap">
+-          <h1 className="font-display text-3xl sm:text-4xl font-medium leading-tight">
+-            {path.title}
+-          </h1>
+-          <div className="flex flex-wrap items-center gap-2">
+-            {path.status === "READY" && (
+-              <button
+-                type="button"
+-                className="btn btn--sage"
+-                aria-label="Request a trail guide for this route"
+-              >
+-                <span className="presence-dot" />
+-                Request trail guide
+-              </button>
+-            )}
++          {path.status === "READY" && (
+             <button
+-              onClick={handleDelete}
+-              disabled={deleting}
+-              className="btn btn--ghost disabled:opacity-50 disabled:cursor-not-allowed"
+-              style={{ borderColor: "rgba(248,113,113,0.35)", color: "#f87171" }}
++              type="button"
++              className="btn btn--sage"
++              aria-label="Request a trail guide for this route"
+             >
+-              {deleting ? "Deleting..." : "Delete Route"}
++              <span className="presence-dot" />
++              Request trail guide
+             </button>
+-          </div>
++          )}
++          <button
++            onClick={handleDelete}
++            disabled={deleting}
++            className="btn btn--ghost disabled:opacity-50 disabled:cursor-not-allowed"
++            style={{ borderColor: "rgba(248,113,113,0.35)", color: "#f87171" }}
++          >
++            {deleting ? "Deleting..." : "Delete Route"}
++          </button>
+         </div>
+ 
+         {path.status === "GENERATING" && (
+-- 
+2.43.0
+

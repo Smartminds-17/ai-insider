@@ -1,0 +1,349 @@
+From 7c0e272e2c054b4a8183332652f9bed6a3d6f762 Mon Sep 17 00:00:00 2001
+From: Claude <claude@anthropic.com>
+Date: Sun, 13 Sep 2026 10:06:34 +0000
+Subject: [PATCH] feat: resume video playback from last position
+
+- Progress model: add lastPositionSec + updatedAt
+- getPath: surface lastPositionSec per video in PathView
+- trackProgress: saveVideoPosition() upserts last position
+- /api/progress: accept optional positionSec alongside watched
+- VideoEmbed: seek to saved position on load, report position
+  every 5s while playing and on pause/unmount
+- TopicWaypoint/PathRoadmap: wire onProgress through to the API,
+  show a small 'Resuming from mm:ss' hint
+---
+ app/api/progress/route.ts        | 19 +++++++---
+ components/PathRoadmap.tsx       | 12 ++++++
+ components/TopicWaypoint.tsx     | 15 +++++++-
+ components/VideoEmbed.tsx        | 64 ++++++++++++++++++++++++++++++--
+ prisma/schema.prisma             | 16 ++++----
+ src/application/getPath.ts       |  3 ++
+ src/application/trackProgress.ts | 12 ++++++
+ src/domain/types.ts              |  1 +
+ 8 files changed, 125 insertions(+), 17 deletions(-)
+
+diff --git a/app/api/progress/route.ts b/app/api/progress/route.ts
+index 15a7376..d8c3231 100644
+--- a/app/api/progress/route.ts
++++ b/app/api/progress/route.ts
+@@ -1,21 +1,30 @@
+ import { NextRequest, NextResponse } from "next/server";
+ import { getOrCreateUserId } from "@/infrastructure/auth/getOrCreateUserId";
+-import { setVideoWatched } from "@/application/trackProgress";
++import { setVideoWatched, saveVideoPosition } from "@/application/trackProgress";
+ 
+ export async function POST(req: NextRequest) {
+   const body = await req.json().catch(() => null);
+   const videoId = typeof body?.videoId === "string" ? body.videoId : null;
+   const watched = typeof body?.watched === "boolean" ? body.watched : null;
++  const positionSec = typeof body?.positionSec === "number" && Number.isFinite(body.positionSec)
++    ? body.positionSec
++    : null;
+ 
+-  if (!videoId || watched === null) {
++  if (!videoId || (watched === null && positionSec === null)) {
+     return NextResponse.json(
+-      { data: null, meta: {}, error: { code: "INVALID_INPUT", message: "videoId and watched are required" } },
++      { data: null, meta: {}, error: { code: "INVALID_INPUT", message: "videoId and (watched or positionSec) are required" } },
+       { status: 400 }
+     );
+   }
+ 
+   const userId = await getOrCreateUserId();
+-  await setVideoWatched(userId, videoId, watched);
+ 
+-  return NextResponse.json({ data: { videoId, watched }, meta: {}, error: null });
++  if (watched !== null) {
++    await setVideoWatched(userId, videoId, watched);
++  }
++  if (positionSec !== null) {
++    await saveVideoPosition(userId, videoId, positionSec);
++  }
++
++  return NextResponse.json({ data: { videoId, watched, positionSec }, meta: {}, error: null });
+ }
+diff --git a/components/PathRoadmap.tsx b/components/PathRoadmap.tsx
+index 9db9415..193eb0a 100644
+--- a/components/PathRoadmap.tsx
++++ b/components/PathRoadmap.tsx
+@@ -64,6 +64,17 @@ export default function PathRoadmap({ pathId }: PathRoadmapProps) {
+     });
+   }
+ 
++  // Called periodically (every ~5s while playing, plus on pause/unmount) by
++  // VideoEmbed. We don't need this reflected in local state immediately —
++  // it only matters on the next load — so just fire-and-forget the save.
++  const handleProgress = useCallback((videoId: string, positionSec: number) => {
++    fetch("/api/progress", {
++      method: "POST",
++      headers: { "Content-Type": "application/json" },
++      body: JSON.stringify({ videoId, positionSec }),
++    }).catch((err) => console.log("Failed to save video position:", err));
++  }, []);
++
+   // If path becomes not found after loading, redirect to /paths
+   useEffect(() => {
+     if (notFound) {
+@@ -185,6 +196,7 @@ export default function PathRoadmap({ pathId }: PathRoadmapProps) {
+               topic={topic}
+               isLast={i === path.topics.length - 1}
+               onToggleWatched={handleToggleWatched}
++              onProgress={handleProgress}
+               isExpanded={expandedTopicIndex === i}
+               onToggle={() => handleToggleTopic(i)}
+             />
+diff --git a/components/TopicWaypoint.tsx b/components/TopicWaypoint.tsx
+index 4e71fb2..029eefc 100644
+--- a/components/TopicWaypoint.tsx
++++ b/components/TopicWaypoint.tsx
+@@ -7,6 +7,7 @@ interface TopicWaypointProps {
+   topic: PathView["topics"][number];
+   isLast: boolean;
+   onToggleWatched: (videoId: string, watched: boolean) => void;
++  onProgress: (videoId: string, positionSec: number) => void;
+   isExpanded: boolean;
+   onToggle: () => void;
+ }
+@@ -17,7 +18,7 @@ function formatDuration(sec: number): string {
+   return `${m}:${s.toString().padStart(2, "0")}`;
+ }
+ 
+-export default function TopicWaypoint({ topic, isLast, onToggleWatched, isExpanded, onToggle }: TopicWaypointProps) {
++export default function TopicWaypoint({ topic, isLast, onToggleWatched, onProgress, isExpanded, onToggle }: TopicWaypointProps) {
+   const watchedCount = topic.videos.filter((v) => v.watched).length;
+   const complete = topic.videos.length > 0 && watchedCount === topic.videos.length;
+ 
+@@ -101,7 +102,17 @@ export default function TopicWaypoint({ topic, isLast, onToggleWatched, isExpand
+         <div className="pb-8 space-y-4">
+           {topic.videos.map((video) => (
+             <div key={video.id} className="bg-[var(--ink-2)] border border-white/10 rounded-lg p-3">
+-              <VideoEmbed youtubeVideoId={video.youtubeVideoId} title={video.title} />
++              <VideoEmbed
++                youtubeVideoId={video.youtubeVideoId}
++                title={video.title}
++                initialPositionSec={video.lastPositionSec}
++                onProgress={(sec) => onProgress(video.id, sec)}
++              />
++              {video.lastPositionSec > 5 && !video.watched && (
++                <p className="text-[10px] font-mono text-[var(--text-dim)] mt-1">
++                  Resuming from {formatDuration(Math.floor(video.lastPositionSec))}
++                </p>
++              )}
+               <div className="mt-3 flex items-start justify-between gap-3">
+                 <div className="min-w-0">
+                   <a
+diff --git a/components/VideoEmbed.tsx b/components/VideoEmbed.tsx
+index 6e041cc..5df87c4 100644
+--- a/components/VideoEmbed.tsx
++++ b/components/VideoEmbed.tsx
+@@ -9,9 +9,13 @@ declare global {
+       Player: new (element: HTMLElement, options: unknown) => {
+         pauseVideo: () => void;
+         destroy: () => void;
++        seekTo: (seconds: number, allowSeekAhead: boolean) => void;
++        getCurrentTime: () => number;
+       };
+       PlayerState?: {
+         PLAYING: number;
++        PAUSED: number;
++        ENDED: number;
+       };
+     };
+     onYouTubeIframeAPIReady?: () => void;
+@@ -21,14 +25,28 @@ declare global {
+ interface VideoEmbedProps {
+   youtubeVideoId: string;
+   title: string;
++  /** Where to resume playback from, in seconds. Ignored if under 5s. */
++  initialPositionSec?: number;
++  /** Called periodically (while playing) and on pause/unmount with the current position, in seconds. */
++  onProgress?: (positionSec: number) => void;
+ }
+ 
++// How often to report the playback position while a video is playing.
++const PROGRESS_REPORT_INTERVAL_MS = 5000;
++// Don't bother resuming for positions this close to the start.
++const MIN_RESUME_POSITION_SEC = 5;
++
+ // PER-BROWSER (local) tracking of the active playing iframe - this is NOT shared between users/browsers
+ // Each user's browser session maintains its own state, so only ONE video plays per browser page
+ let activePlayingIframe: HTMLIFrameElement | null = null;
+ 
+-export default function VideoEmbed({ youtubeVideoId, title }: VideoEmbedProps) {
++export default function VideoEmbed({ youtubeVideoId, title, initialPositionSec = 0, onProgress }: VideoEmbedProps) {
+   const iframeRef = useRef<HTMLIFrameElement>(null);
++  // Keep the latest onProgress in a ref so the effect below doesn't need to
++  // re-run (and re-create the player) every time the parent passes a new
++  // function identity.
++  const onProgressRef = useRef(onProgress);
++  onProgressRef.current = onProgress;
+ 
+   useEffect(() => {
+     const iframe = iframeRef.current;
+@@ -42,6 +60,21 @@ export default function VideoEmbed({ youtubeVideoId, title }: VideoEmbedProps) {
+       firstScriptTag.parentNode?.insertBefore(tag, firstScriptTag);
+     }
+ 
++    let progressInterval: ReturnType<typeof setInterval> | null = null;
++    let player: { getCurrentTime: () => number; seekTo: (seconds: number, allowSeekAhead: boolean) => void } | null = null;
++
++    const reportProgress = () => {
++      if (!player) return;
++      try {
++        const seconds = player.getCurrentTime();
++        if (Number.isFinite(seconds)) {
++          onProgressRef.current?.(seconds);
++        }
++      } catch {
++        // Player may not be ready/available yet — safe to ignore.
++      }
++    };
++
+     // Initialize player once YouTube API is ready
+     const initPlayer = () => {
+       if (!window.YT?.Player) {
+@@ -50,9 +83,18 @@ export default function VideoEmbed({ youtubeVideoId, title }: VideoEmbedProps) {
+         return;
+       }
+       
+-      new window.YT.Player(iframe, {
++      player = new window.YT.Player(iframe, {
+         events: {
+-          onReady: () => {},
++          onReady: () => {
++            // Resume from the last saved position, unless it's basically the start
++            if (initialPositionSec > MIN_RESUME_POSITION_SEC) {
++              try {
++                player?.seekTo(initialPositionSec, true);
++              } catch (err) {
++                console.log("Failed to seek to resume position", err);
++              }
++            }
++          },
+           onStateChange: (event: { data: number }) => {
+             // YouTube PlayerState.PLAYING = 1
+             if (event.data === 1) {
+@@ -70,6 +112,17 @@ export default function VideoEmbed({ youtubeVideoId, title }: VideoEmbedProps) {
+               }
+               // Set this iframe as the new active playing one
+               activePlayingIframe = iframe;
++
++              // Start reporting playback position periodically while playing
++              if (progressInterval) clearInterval(progressInterval);
++              progressInterval = setInterval(reportProgress, PROGRESS_REPORT_INTERVAL_MS);
++            } else {
++              // Paused, ended, buffering, etc. — stop polling but save one last position
++              if (progressInterval) {
++                clearInterval(progressInterval);
++                progressInterval = null;
++              }
++              reportProgress();
+             }
+           },
+         },
+@@ -85,10 +138,15 @@ export default function VideoEmbed({ youtubeVideoId, title }: VideoEmbedProps) {
+ 
+     // Cleanup
+     return () => {
++      if (progressInterval) clearInterval(progressInterval);
++      reportProgress();
+       if (activePlayingIframe === iframe) {
+         activePlayingIframe = null;
+       }
+     };
++    // initialPositionSec is intentionally excluded: it's only meant to apply
++    // once, when the player is first created for this video.
++    // eslint-disable-next-line react-hooks/exhaustive-deps
+   }, [youtubeVideoId]);
+ 
+   // Enable JS API for programmatic control, add playsinline to prevent fullscreen hijack
+diff --git a/prisma/schema.prisma b/prisma/schema.prisma
+index 89a51c6..9a5e5f5 100644
+--- a/prisma/schema.prisma
++++ b/prisma/schema.prisma
+@@ -97,13 +97,15 @@ model TopicVideo {
+ }
+ 
+ model Progress {
+-  id        String    @id @default(uuid())
+-  userId    String
+-  videoId   String
+-  watched   Boolean   @default(false)
+-  watchedAt DateTime?
+-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+-  video     Video     @relation(fields: [videoId], references: [id], onDelete: Cascade)
++  id              String    @id @default(uuid())
++  userId          String
++  videoId         String
++  watched         Boolean   @default(false)
++  watchedAt       DateTime?
++  lastPositionSec Int       @default(0)
++  updatedAt       DateTime  @updatedAt
++  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
++  video           Video     @relation(fields: [videoId], references: [id], onDelete: Cascade)
+ 
+   @@unique([userId, videoId])
+   @@index([userId])
+diff --git a/src/application/getPath.ts b/src/application/getPath.ts
+index 088eb5b..b3cc2c0 100644
+--- a/src/application/getPath.ts
++++ b/src/application/getPath.ts
+@@ -28,6 +28,7 @@ interface TopicRow {
+ interface ProgressRow {
+   videoId: string;
+   watched: boolean;
++  lastPositionSec: number;
+ }
+ 
+ // 1 hour TTL for anonymous user paths (deleted after refresh/navigate away)
+@@ -74,6 +75,7 @@ export async function getPath(pathId: string, userId: string): Promise<PathView
+     where: { userId, videoId: { in: videoIds } },
+   })) as unknown as ProgressRow[];
+   const watchedSet = new Set(progressRows.filter((p) => p.watched).map((p) => p.videoId));
++  const positionMap = new Map(progressRows.map((p) => [p.videoId, p.lastPositionSec]));
+ 
+   return {
+     id: path.id,
+@@ -94,6 +96,7 @@ export async function getPath(pathId: string, userId: string): Promise<PathView
+         thumbnailUrl: tv.video.thumbnailUrl,
+         durationSec: tv.video.durationSec,
+         watched: watchedSet.has(tv.video.id),
++        lastPositionSec: positionMap.get(tv.video.id) ?? 0,
+         selected: tv.selected,
+         source: tv.source as VideoSource,
+       })),
+diff --git a/src/application/trackProgress.ts b/src/application/trackProgress.ts
+index 4490d69..f31a986 100644
+--- a/src/application/trackProgress.ts
++++ b/src/application/trackProgress.ts
+@@ -7,3 +7,15 @@ export async function setVideoWatched(userId: string, videoId: string, watched:
+     create: { userId, videoId, watched, watchedAt: watched ? new Date() : null },
+   });
+ }
++
++// Saves the last playback position for a video so the player can resume from
++// where the user left off. Called periodically while playing and on
++// pause/unload — not on every timeupdate — so this stays cheap to call.
++export async function saveVideoPosition(userId: string, videoId: string, positionSec: number) {
++  const clamped = Math.max(0, Math.floor(positionSec));
++  await prisma.progress.upsert({
++    where: { userId_videoId: { userId, videoId } },
++    update: { lastPositionSec: clamped },
++    create: { userId, videoId, lastPositionSec: clamped },
++  });
++}
+diff --git a/src/domain/types.ts b/src/domain/types.ts
+index 57ae5a8..f1d553e 100644
+--- a/src/domain/types.ts
++++ b/src/domain/types.ts
+@@ -62,6 +62,7 @@ export interface PathView {
+       thumbnailUrl: string;
+       durationSec: number;
+       watched: boolean;
++      lastPositionSec: number;
+       selected: boolean;
+       source: VideoSource;
+     }[];
+-- 
+2.43.0
+
