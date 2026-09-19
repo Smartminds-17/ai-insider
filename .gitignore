@@ -5,3 +5,5 @@ node_modules
 client_secret_*.json
 *.tsbuildinfo
 .DS_Store.env
+.vercel
+.env*
