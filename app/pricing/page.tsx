@@ -1,4 +1,12 @@
-import Link from "next/link";
+import { redirect } from "next/navigation";
+
+// Billing is intentionally unavailable until subscriptions and entitlements
+// exist end-to-end. Keep old bookmarks safe without advertising a fake plan.
+export default function PricingPage() {
+  redirect("/");
+}
+
+/*
 
 type TierId = "day" | "thru" | "guided";
 
@@ -280,3 +288,4 @@ export default function PricingPage() {
     </main>
   );
 }
+*/

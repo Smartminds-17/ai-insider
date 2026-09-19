@@ -1,15 +1,18 @@
 # AI Insider
 
-Tell it what you want to learn. It turns that into an ordered syllabus, finds
-the best YouTube video(s) for each step, and tracks your progress through it.
+AI Insider turns a learning goal into an ordered YouTube study route and saves
+your progress. The currently shipped product is the route generator, tutorial
+selection, sign-in, and video resume flow. Billing, community, mentors, teams,
+and editable routes are intentionally not available yet.
 
 ## Stack
 
-- **Next.js 15** (App Router, TypeScript) — frontend + API routes in one app
-- **PostgreSQL + Prisma** — see `prisma/schema.prisma`
-- **Claude (Anthropic API)** — syllabus generation from a free-text prompt
-- **YouTube Data API v3** — video search per topic
-- Anonymous per-browser identity via cookie (no accounts in v1)
+- **Next.js 16** (App Router, TypeScript)
+- **PostgreSQL + Prisma**
+- **Google Gemini** for syllabus generation (opt in with `USE_REAL_GEMINI_API=true`)
+- **YouTube Data API v3** for tutorial sourcing
+- **Google OAuth and anonymous browser identity**
+- **BullMQ + native Redis** for durable path generation when `REDIS_URL` is configured
 
 ## Architecture
 
@@ -21,7 +24,7 @@ src/
     db/                # Prisma client
     youtube/            # YouTube client + ranking heuristic (rankVideos.ts)
     llm/                # syllabus generation (syllabusGenerator.ts)
-    auth/               # anonymous cookie-based user identity
+    auth/               # anonymous cookie-based user identity and ownership checks
 app/
   page.tsx             # prompt entry screen
   path/[id]/page.tsx    # roadmap view
@@ -29,7 +32,7 @@ app/
 components/            # PromptForm, PathRoadmap, TopicWaypoint, VideoEmbed, RelatedRail
 ```
 
-API routes never talk to Prisma/YouTube/Anthropic directly — they call into
+API routes never talk to Prisma/YouTube/Gemini directly — they call into
 `src/application/`, which orchestrates the infrastructure layer. This means
 swapping the LLM provider, the ranking algorithm, or the DB later only
 touches one file each.
@@ -50,7 +53,7 @@ touches one file each.
    ```
 
 4. **Add API keys (optional but recommended)** in `.env`:
-   - `ANTHROPIC_API_KEY` — without it, syllabus generation falls back to a
+   - `GEMINI_API_KEY` plus `USE_REAL_GEMINI_API=true` — without them, syllabus generation falls back to a
      generic 5-topic outline so you can still test the rest of the app.
    - `YOUTUBE_API_KEY` — without it, video search falls back to mock results
      so you can still test the UI/progress flow without burning API quota.
@@ -61,13 +64,20 @@ touches one file each.
    ```
    Visit http://localhost:3000
 
-## What's deliberately not in v1
+## Deliberately not available yet
 
-Per the scoping we did before building: no editable syllabus (AI-locked
-ordering), no practice/pause checkpoints, no transcript-based difficulty
-classification, no real accounts, no payments. See the ranking heuristic in
+No billing, plans, payments, mentor sessions, community, team features, or
+editable syllabus. See the ranking heuristic in
 `src/infrastructure/youtube/rankVideos.ts` — it uses view count, duration
 fit, and recency, not transcript analysis, to keep API/LLM costs low for v1.
+
+## Deployment
+
+Use the included container configuration for a production-like image. The
+blue/green host rollout, required secrets, health checks, and rollback process
+are documented in [docs/blue-green.md](docs/blue-green.md). Do not deploy
+until migrations, production secrets, HTTPS, and both colours have been
+verified against a non-production environment.
 
 # AI Insider
 ## Changelog

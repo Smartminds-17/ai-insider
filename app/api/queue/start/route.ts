@@ -1,6 +1,7 @@
 import { pathGenerationWorker } from "@/infrastructure/queues/pathGeneration.queue";
 import type { Job } from "bullmq";
 import { NextRequest, NextResponse } from "next/server";
+import { timingSafeEqual } from "node:crypto";
 
 // Initialize queue worker - call this once on app startup or via a cron job
 export async function GET(req: NextRequest) {
@@ -10,11 +11,10 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // Get secret from request URL query parameter
-  const { searchParams } = new URL(req.url);
-  const requestSecret = searchParams.get("secret");
-  
-  if (requestSecret !== internalSecret) {
+  const requestSecret = req.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? "";
+  const expected = Buffer.from(internalSecret);
+  const received = Buffer.from(requestSecret);
+  if (received.length !== expected.length || !timingSafeEqual(received, expected)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

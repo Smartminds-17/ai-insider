@@ -1,6 +1,8 @@
 import { getUserPaths } from "@/application/getUserPaths";
 import { getOrCreateUserId } from "@/infrastructure/auth/getOrCreateUserId";
+import { prisma } from "@/infrastructure/db/prisma";
 import { queuePathGeneration } from "@/infrastructure/queues/pathGeneration.queue";
+import { rateLimit, rateLimits } from "@/infrastructure/rate-limit";
 import { Redis } from "@upstash/redis";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -25,13 +27,69 @@ const getRedis = () => {
 
 const redis = getRedis();
 
+// Free tier limit: 3 routes per month
+const FREE_TIER_MONTHLY_LIMIT = 3;
+
 export async function GET() {
-  const userId = await getOrCreateUserId();
-  const paths = await getUserPaths(userId);
-  return NextResponse.json({ data: paths, meta: {}, error: null });
+  try {
+    const userId = await getOrCreateUserId();
+    const paths = await getUserPaths(userId);
+    
+    // Calculate current month's usage for the current user
+    const now = new Date();
+    const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const monthlyPaths = paths.filter(path => new Date(path.createdAt) >= firstDayOfMonth);
+    const monthlyUsage = monthlyPaths.length;
+    
+    // Calculate TOTAL platform-wide paths created this month (resets every month)
+    const totalMonthlyPaths = await prisma.learningPath.count({
+      where: {
+        createdAt: {
+          gte: firstDayOfMonth
+        }
+      }
+    });
+    
+    // Calculate LIFETIME total paths created since product launch (never resets - for landing page)
+    const lifetimeTotalPaths = await prisma.learningPath.count({});
+    
+    return NextResponse.json({ 
+      data: paths, 
+      meta: { 
+        monthlyUsage,
+        monthlyLimit: FREE_TIER_MONTHLY_LIMIT,
+        totalMonthlyPaths,
+        lifetimeTotalPaths
+      }, 
+      error: null 
+    });
+  } catch (error) {
+    console.error("⚠️ GET /api/paths failed:", {
+      error: error instanceof Error ? error.message : "Unknown error",
+      code: (error as { code?: string })?.code
+    });
+    return NextResponse.json(
+      { 
+        data: [], 
+        meta: { monthlyUsage: 0, monthlyLimit: 3, totalMonthlyPaths: 0, lifetimeTotalPaths: 0 }, 
+        error: { 
+          code: "INTERNAL_ERROR", 
+          message: "Failed to load your learning paths. Please refresh and try again." 
+        } 
+      },
+      { status: 500 }
+    );
+  }
 }
 
 export async function POST(req: NextRequest) {
+  const localLimit = await rateLimit(req, rateLimits.generatePath);
+  if (!localLimit.success) {
+    return NextResponse.json(
+      { data: null, meta: {}, error: { code: "RATE_LIMITED", message: "You've created too many paths recently. Please try again in an hour." } },
+      { status: 429 }
+    );
+  }
   const body = await req.json().catch(() => null);
   const prompt = typeof body?.prompt === "string" ? body.prompt.trim() : "";
 
@@ -93,12 +151,32 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ data: { id: duplicatePath.id }, meta: {}, error: null }, { status: 202 });
     }
 
-    // 3. Use production-grade queue to handle path generation
+    // 3. Check free tier monthly limit before creating new path
+    const now = new Date();
+    const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const monthlyPaths = existingPaths.filter(path => new Date(path.createdAt) >= firstDayOfMonth);
+    const monthlyUsage = monthlyPaths.length;
+
+    if (monthlyUsage >= FREE_TIER_MONTHLY_LIMIT) {
+      return NextResponse.json(
+        { 
+          data: null, 
+          meta: { monthlyUsage, monthlyLimit: FREE_TIER_MONTHLY_LIMIT }, 
+          error: { 
+            code: "LIMIT_REACHED", 
+            message: "You've used all 3 of your free paths this month. Upgrade to create more!" 
+          } 
+        },
+        { status: 402 } // Payment Required status code
+      );
+    }
+
+    // 4. Use production-grade queue to handle path generation
      const { jobId } = await queuePathGeneration(userId, prompt);
      
      // Return immediately to the user with their job ID
      // The frontend will poll for updates on this path
-     return NextResponse.json({ data: { id: jobId }, meta: {}, error: null }, { status: 202 });
+     return NextResponse.json({ data: { id: jobId }, meta: { monthlyUsage: monthlyUsage + 1, monthlyLimit: FREE_TIER_MONTHLY_LIMIT }, error: null }, { status: 202 });
   } catch (err) {
     console.error("generatePath failed", err);
     return NextResponse.json(

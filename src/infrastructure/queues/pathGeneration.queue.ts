@@ -1,35 +1,49 @@
 import { createLearningPath, processLearningPathTopics } from "@/application/generatePath";
 import type { Syllabus } from "@/domain/types";
+import { prisma } from "@/infrastructure/db/prisma";
 import { Queue, Worker } from "bullmq";
 
-// Create Upstash Redis connection for BullMQ (uses REDIS_URL format: redis://:<password>@<host>:port)
+// BullMQ requires a native Redis connection. Upstash REST credentials are only
+// suitable for HTTP clients such as @upstash/redis, not for a queue worker.
 const getRedisConnection = () => {
-  const upstashRestUrl = process.env.UPSTASH_REDIS_REST_URL;
-  const upstashToken = process.env.UPSTASH_REDIS_REST_TOKEN;
-  
-  if (!upstashRestUrl?.trim() || !upstashToken?.trim()) {
+  const redisUrl = process.env.REDIS_URL;
+  if (!redisUrl?.trim()) {
     // Fallback to in-memory queue for local development (no Redis required)
-    console.log("⚠️ No Upstash credentials found - using local in-memory concurrency control instead of BullMQ");
+    console.log("⚠️ No REDIS_URL found - using local in-memory concurrency control instead of BullMQ");
     return null;
   }
 
   try {
-    // Upstash REST URL = https://<username>:<password>@<host>.upstash.io
-    // We need to extract host and password for native Redis connection
-    const url = new URL(upstashRestUrl);
-    // For Upstash Redis, the native password is the UPSTASH_REDIS_REST_TOKEN, NOT the password from the REST URL
-    const host = url.hostname;
+    // Parse Redis URL and format correctly for BullMQ (supports both local and Upstash)
+    const parsedUrl = new URL(redisUrl);
+    const isLocalRedis = parsedUrl.hostname === "localhost" || parsedUrl.hostname === "127.0.0.1";
     
-    // Return connection config that works with Upstash Redis (proper authentication)
-    return {
-      host,
-      port: 6379,
-      username: "default", // Upstash always uses "default" as the username
-      password: upstashToken, // Use the actual REST token as the Redis password
-      tls: {}, // Upstash requires TLS encryption
+    console.log(`✅ Using ${isLocalRedis ? "local" : "remote (Upstash)"} Redis for BullMQ queue:`, parsedUrl.hostname);
+    
+    // Build connection config - only use TLS for remote/Upstash Redis
+    const connection: {
+      hostname: string;
+      port: number;
+      username?: string;
+      password?: string;
+      tls?: { rejectUnauthorized: boolean };
+    } = {
+      hostname: parsedUrl.hostname,
+      port: parseInt(parsedUrl.port || "6379"),
     };
+    
+    // Only add credentials and TLS if they exist in the URL (required for Upstash)
+    if (parsedUrl.username) connection.username = parsedUrl.username;
+    if (parsedUrl.password) connection.password = parsedUrl.password;
+    if (!isLocalRedis) {
+      connection.tls = {
+        rejectUnauthorized: true, // Required for Upstash TLS
+      };
+    }
+    
+    return connection;
   } catch (err) {
-    console.error("❌ Failed to parse Upstash Redis URL, falling back to in-memory queue:", err);
+    console.error("❌ Failed to parse Redis URL, falling back to in-memory queue:", err);
     return null;
   }
 };
@@ -83,40 +97,125 @@ export async function queuePathGeneration(userId: string, prompt: string): Promi
   // writes, so the frontend gets a real database ID right away.
   const { pathId, syllabus } = await createLearningPath(userId, prompt);
 
-  // Case 1: Production with BullMQ + Upstash Redis — hand the slow phase
-  // (YouTube sourcing) to the worker so it runs exactly once, out of the
-  // request path.
+  // Case 1: Try to use BullMQ queue if available, but fall back to local if it fails
+  let queueAddFailed = false;
   if (pathGenerationQueue) {
-    // Check rate limit for this user before adding to queue
-    const userJobs = await pathGenerationQueue.getJobs(["active", "waiting"]);
-    const userRecentJobs = userJobs.filter(job => job.data.userId === userId);
+    try {
+      // Check rate limit for this user before adding to queue
+      const userJobs = await pathGenerationQueue.getJobs(["active", "waiting"]);
+      const userRecentJobs = userJobs.filter(job => job.data.userId === userId);
 
-    if (userRecentJobs.length >= 5) {
-      throw new Error("RATE_LIMITED");
-    }
-
-    // Add job to BullMQ queue to process in background. Pass the syllabus we
-    // already generated so the worker doesn't call Gemini a second time.
-    await pathGenerationQueue.add(
-      "generate-path",
-      { userId, pathId, syllabus },
-      {
-        attempts: 3, // Retry failed jobs up to 3 times
-        backoff: {
-          type: "exponential",
-          delay: 1000, // Start with 1s delay, double each retry
-        },
-        removeOnComplete: true, // Clean up successful jobs
-        removeOnFail: 100, // Keep last 100 failed jobs for debugging
+      if (userRecentJobs.length >= 5) {
+        throw new Error("RATE_LIMITED");
       }
-    );
 
-    return { jobId: pathId }; // Return real DB path ID, not BullMQ job ID
+      // Add job to BullMQ queue to process in background. Pass the syllabus we
+      // already generated so the worker doesn't call Gemini a second time.
+      await pathGenerationQueue.add(
+        "generate-path",
+        { userId, pathId, syllabus },
+        {
+          attempts: 3, // Retry failed jobs up to 3 times
+          backoff: {
+            type: "exponential",
+            delay: 1000, // Start with 1s delay, double each retry
+          },
+          removeOnComplete: true, // Clean up successful jobs
+          removeOnFail: 100, // Keep last 100 failed jobs for debugging
+        }
+      );
+    } catch (queueErr) {
+      console.warn("⚠️ Failed to add job to BullMQ queue, falling back to local processing:", queueErr);
+      queueAddFailed = true;
+    }
   }
 
-  // Case 2: Local development — no Redis configured, so run the slow phase
-  // inline in the background (fire-and-forget; the path is already READY-
-  // pending in the DB and the frontend polls for status).
-  void processLearningPathTopics(pathId, syllabus);
+  // Case 2: Local processing if queue doesn't exist OR queue add failed
+  if (!pathGenerationQueue || queueAddFailed) {
+    void processLearningPathTopics(pathId, syllabus).catch((error) => {
+      console.error("Local path generation failed:", error);
+    });
+  }
+  
+  return { jobId: pathId }; // Return real DB path ID, not BullMQ job ID
+}
+
+// Helper to restart stuck GENERATING paths (for server reboots or manual retries)
+export async function restartStuckPath(pathId: string, userId: string): Promise<{ jobId: string }> {
+  // Fetch the existing path and its syllabus from the database
+  const existingPath = await prisma.learningPath.findUnique({
+    where: { id: pathId, userId },
+    include: { topics: true }
+  });
+
+  if (!existingPath) {
+    throw new Error("Path not found");
+  }
+
+  // Reconstruct syllabus from existing topics
+  const syllabus = {
+    title: existingPath.title,
+    topics: existingPath.topics.map(t => ({ title: t.title, order: t.order }))
+  };
+
+  // Reset status to GENERATING and restart processing
+  await prisma.learningPath.update({
+    where: { id: pathId },
+    data: { status: "GENERATING" }
+  });
+
+  // Use the same queue logic as new path generation - with fallback if queue fails
+  let queueAddFailed = false;
+  if (pathGenerationQueue) {
+    try {
+      await pathGenerationQueue.add(
+        "generate-path",
+        { userId, pathId, syllabus },
+        {
+          attempts: 3,
+          backoff: { type: "exponential", delay: 1000 },
+          removeOnComplete: true,
+          removeOnFail: 100,
+        }
+      );
+    } catch (queueErr) {
+      console.warn("⚠️ Failed to add job to BullMQ queue, falling back to local processing:", queueErr);
+      queueAddFailed = true;
+    }
+  }
+
+  // Fallback to local processing if queue doesn't exist OR queue add failed
+  if (!pathGenerationQueue || queueAddFailed) {
+    void processLearningPathTopics(pathId, syllabus).catch((error) => {
+      console.error("Local path re-generation failed:", error);
+    });
+  }
+
   return { jobId: pathId };
+}
+
+// Automatically restart all stuck GENERATING paths when server starts (works with or without Redis)
+if (process.env.NODE_ENV === "development") {
+  setTimeout(async () => {
+    try {
+      const stuckPaths = await prisma.learningPath.findMany({
+        where: { status: "GENERATING" },
+        select: { id: true, userId: true, createdAt: true }
+      });
+
+      if (stuckPaths.length > 0) {
+        console.log(`🔄 Found ${stuckPaths.length} stuck generating paths, attempting to restart...`);
+        for (const path of stuckPaths) {
+          // Only restart paths created in the last 24h to avoid old stale paths
+          const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+          if (path.createdAt > dayAgo) {
+            console.log(`Restarting path: ${path.id} (local mode: ${!pathGenerationQueue})`);
+            await restartStuckPath(path.id, path.userId);
+          }
+        }
+      }
+    } catch (err) {
+      console.error("Failed to restart stuck paths:", err);
+    }
+  }, 5000); // Wait 5s after server boot to avoid running during startup
 }

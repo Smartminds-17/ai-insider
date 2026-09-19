@@ -18,7 +18,13 @@ function parseIsoDuration(iso: string): number {
 // Retry with exponential backoff for rate limits (429) and transient errors
 async function fetchWithRetry(url: string, retries = 5, baseDelay = 2000): Promise<Response> {
   try {
-    const response = await fetch(url);
+    // Add 30 second timeout to avoid hanging connections that cause ETIMEDOUT
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
+    
+    const response = await fetch(url, { signal: controller.signal });
+    clearTimeout(timeoutId);
+    
     if (response.status === 429) {
       // Handle rate limit with exponential backoff
       if (retries > 0) {
@@ -30,10 +36,11 @@ async function fetchWithRetry(url: string, retries = 5, baseDelay = 2000): Promi
     }
     return response;
   } catch (err) {
-    // Handle network errors with retry
+    // Handle network errors, timeouts, and aborts with retry
     if (retries > 0) {
       const delay = baseDelay * Math.pow(2, 5 - retries);
-      console.log(`Network error, retrying in ${delay}ms... (${retries} retries left)`);
+      const error = err as Error;
+      console.log(`Network/timeout error (${error.message}), retrying in ${delay}ms... (${retries} retries left)`);
       await new Promise(resolve => setTimeout(resolve, delay));
       return fetchWithRetry(url, retries - 1, baseDelay);
     }
@@ -75,7 +82,7 @@ class YouTubeRateLimiter {
       // If we need to wait before processing next, wait and then continue
       if (timeSinceLastRequest < this.MIN_DELAY_BETWEEN_REQUESTS) {
         const waitTime = this.MIN_DELAY_BETWEEN_REQUESTS - timeSinceLastRequest;
-        console.log(`YouTube quota: waiting ${Math.round(waitTime/1000/60)} minutes for next search...`);
+        console.log(`YouTube quota: waiting ${Math.round(waitTime/1000)} seconds for next search...`);
         await new Promise(resolve => setTimeout(resolve, waitTime));
       }
 

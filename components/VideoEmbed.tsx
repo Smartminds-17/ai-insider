@@ -224,7 +224,7 @@ export default function VideoEmbed({ youtubeVideoId, title, videoId, durationSec
       if (localTimerRef.current) clearInterval(localTimerRef.current);
       if (activePlayingIframe === iframe) activePlayingIframe = null;
     };
-  }, [youtubeVideoId, fetchSavedPosition, saveCurrentPosition]);
+  }, [youtubeVideoId, fetchSavedPosition, saveCurrentPosition, videoId]);
 
   // Handle click on progress bar to seek to that position
   const handleProgressClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {

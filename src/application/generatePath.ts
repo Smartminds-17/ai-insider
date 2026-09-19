@@ -1,5 +1,5 @@
-import { prisma } from "@/infrastructure/db/prisma";
 import type { Syllabus } from "@/domain/types";
+import { prisma } from "@/infrastructure/db/prisma";
 import { generateSyllabus } from "@/infrastructure/llm/syllabusGenerator";
 import { rankVideos } from "@/infrastructure/youtube/rankVideos";
 import { searchVideosForTopic } from "@/infrastructure/youtube/youtubeClient";
@@ -51,9 +51,17 @@ export async function createLearningPath(
  */
 export async function processLearningPathTopics(pathId: string, syllabus: Syllabus): Promise<void> {
   try {
+    const existingPath = await prisma.learningPath.findUnique({
+      where: { id: pathId },
+      select: { status: true },
+    });
+    if (!existingPath || existingPath.status === "READY") return;
+
     const processTopic = async (topic: { title: string; order: number }) => {
-      const createdTopic = await prisma.topic.create({
-        data: {
+      const createdTopic = await prisma.topic.upsert({
+        where: { learningPathId_order: { learningPathId: pathId, order: topic.order } },
+        update: { title: topic.title },
+        create: {
           learningPathId: pathId,
           title: topic.title,
           order: topic.order,
@@ -124,8 +132,8 @@ export async function processLearningPathTopics(pathId: string, syllabus: Syllab
     };
 
     // Process topics ONE AT A TIME (sequentially) to respect YouTube's free tier rate limits
-    // Our global sequential YouTube rate limiter only allows 1 search every 16 minutes, so parallel processing
-    // would just cause extremely long waits in the queue. This way each topic waits its turn properly.
+    // Our global sequential YouTube rate limiter only allows 1 search every 1 second, so parallel processing
+    // would overwhelm the API. This way each topic waits its turn properly.
     for (const topic of syllabus.topics) {
       await processTopic(topic);
     }
@@ -141,6 +149,7 @@ export async function processLearningPathTopics(pathId: string, syllabus: Syllab
       where: { id: pathId },
       data: { status: "FAILED" },
     });
+    throw err;
   }
 }
 

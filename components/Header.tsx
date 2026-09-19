@@ -15,22 +15,28 @@ export default function Header() {
         AI Insider
       </Link>
       <div className="flex items-center gap-5">
+        {/* Design-only: routes-used counter (free-tier usage, future billing).
+            Order below — routes, Paths, messages, avatar — matches the
+            "ai-insider" Figma frame (node 2019:85). */}
+        {/* <span
+          className="text-sm text-[var(--text-dim)] font-light tracking-tight hidden sm:inline"
+          data-usage-slot
+        >
+          2/3 Routes
+        </span> */}
         <Link
           href="/paths"
-          className="text-sm text-[var(--text-dim)] hover:text-[var(--text)] transition hidden sm:inline"
+          className="text-sm text-[var(--text-dim)] hover:text-[var(--text)] transition hidden sm:inline font-light tracking-tight"
         >
-          My Paths
+          Paths
         </Link>
-        {/* Design-only: Usage meter chip slot (for free-tier users, future billing) */}
-        <span className="chip chip--ink hidden sm:inline-flex" data-usage-slot>
-          <span className="legend-label legend-label--dim">2/3 routes</span>
-        </span>
-        <Link
+        {/* <Link
           href="/pricing"
           className="text-sm text-[var(--text-dim)] hover:text-[var(--text)] transition hidden sm:inline"
         >
           Pricing
-        </Link>
+        </Link> */}
+
         {status === "loading" ? (
           <span className="text-xs text-[var(--text-dim)]">Loading...</span>
         ) : session?.user ? (
@@ -41,7 +47,7 @@ export default function Header() {
                 alt={session.user.name ?? "User"}
                 width={32}
                 height={32}
-                className="w-8 h-8 rounded-full"
+                className="w-8 h-8 rounded-full ring-2 ring-white/10"
               />
             )}
             <span className="text-sm text-[var(--text-dim)] hidden sm:inline">

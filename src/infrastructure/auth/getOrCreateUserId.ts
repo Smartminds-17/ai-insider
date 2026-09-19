@@ -50,11 +50,24 @@ export async function getOrCreateUserId(): Promise<string> {
       
       // Only merge if it's a true anonymous user (no email, which all Google users have)
       if (cookieUser && !cookieUser.email) {
-        await mergeAnonymousUser(cookieId, authUser.id);
+        try {
+          await mergeAnonymousUser(cookieId, authUser.id);
+        } catch (mergeError) {
+          console.error("⚠️ mergeAnonymousUser call failed in getOrCreateUserId:", {
+            error: mergeError instanceof Error ? mergeError.message : "Unknown error",
+            cookieId,
+            authUserId: authUser.id
+          });
+          // Continue execution - merge failure is non-critical
+        }
       }
     }
     // Always set the cookie to the current authenticated user's ID (PERSISTENT)
-    cookieStore.set(COOKIE_NAME, authUser.id, persistentCookieOptions());
+    try {
+      cookieStore.set(COOKIE_NAME, authUser.id, persistentCookieOptions());
+    } catch (cookieError) {
+      console.error("⚠️ Failed to set authenticated user cookie:", cookieError);
+    }
     return authUser.id;
   }
 

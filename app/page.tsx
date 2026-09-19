@@ -1,6 +1,47 @@
-import PromptForm from "@/components/PromptForm";
+"use client";
 
-export default function Home() {
+import PromptForm from "@/components/PromptForm";
+import { useSession } from "next-auth/react";
+import { useEffect, useState } from "react";
+
+interface PathsResponse {
+  data: unknown[];
+  meta: {
+    monthlyUsage: number;
+    monthlyLimit: number;
+    totalMonthlyPaths: number;
+    lifetimeTotalPaths: number;
+  };
+  error: { code: string; message: string } | null;
+}
+  
+  export default function Home() {
+  const { data: session } = useSession();
+  const isLoggedIn = !!session?.user;
+  const [displayData, setDisplayData] = useState({
+    monthlyUsage: 0,
+    monthlyLimit: 3,
+    totalMonthlyPaths: 0,
+    lifetimeTotalPaths: 0
+  });
+
+  useEffect(() => {
+    // Fetch all data from API - we'll use what we need based on login status
+    fetch("/api/paths")
+      .then(res => res.json() as Promise<PathsResponse>)
+      .then(json => {
+        if (json.meta) {
+          setDisplayData({
+            monthlyUsage: json.meta.monthlyUsage,
+            monthlyLimit: json.meta.monthlyLimit,
+            totalMonthlyPaths: json.meta.totalMonthlyPaths,
+            lifetimeTotalPaths: json.meta.lifetimeTotalPaths
+          });
+        }
+      })
+      .catch(err => console.error("Failed to load usage data:", err));
+  }, []);
+
   return (
     <main className="flex-1 flex flex-col items-center justify-center px-6 py-20 sm:py-28">
       <div className="w-full max-w-3xl">
@@ -9,7 +50,10 @@ export default function Home() {
           <span className="text-[var(--ink-4)]">·</span>
           <span className="chip chip--ink">
             <span className="chip__dot" />
-            Usage · 2 / 3 routes this month
+            {isLoggedIn 
+              ? `Usage · ${displayData.monthlyUsage} / ${displayData.monthlyLimit} routes this month`
+              : `${displayData.totalMonthlyPaths} path${displayData.totalMonthlyPaths !== 1 ? "s" : ""} created this month`
+            }
           </span>
           <span className="chip chip--route">
             <span className="chip__dot" />

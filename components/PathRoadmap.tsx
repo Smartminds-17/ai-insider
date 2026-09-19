@@ -25,15 +25,33 @@ export default function PathRoadmap({ pathId }: PathRoadmapProps) {
   // (anonymous-cookie or signed-in) — see src/application/getPath.ts, which
   // scopes the query by userId. So the player naturally only ever appears
   // for someone who created this path; anyone else gets `notFound` below.
-  const handleSelectVideo = (video: PathVideo) => {
-    setActiveVideo({
-      id: video.id,
-      youtubeVideoId: video.youtubeVideoId,
-      title: video.title,
-      channelTitle: video.channelTitle,
-      durationSec: video.durationSec,
-      lastPositionSec: video.lastPositionSec,
-    });
+  const handleSelectVideo = async (video: PathVideo) => {
+    // Fetch the latest saved position from the backend before setting as active video
+    try {
+      const res = await fetch(`/api/progress?videoId=${video.id}`);
+      const json = await res.json();
+      const latestPosition = json.data?.lastPositionSec ?? video.lastPositionSec;
+      
+      setActiveVideo({
+        id: video.id,
+        youtubeVideoId: video.youtubeVideoId,
+        title: video.title,
+        channelTitle: video.channelTitle,
+        durationSec: video.durationSec,
+        lastPositionSec: latestPosition,
+      });
+    } catch (err) {
+      // Fallback to local state if fetch fails
+      console.warn("Failed to fetch latest video position, using cached value:", err);
+      setActiveVideo({
+        id: video.id,
+        youtubeVideoId: video.youtubeVideoId,
+        title: video.title,
+        channelTitle: video.channelTitle,
+        durationSec: video.durationSec,
+        lastPositionSec: video.lastPositionSec,
+      });
+    }
   };
 
   const handleToggleTopic = (index: number) => {
@@ -41,14 +59,19 @@ export default function PathRoadmap({ pathId }: PathRoadmapProps) {
   };
 
   const fetchPath = useCallback(async () => {
-    const res = await fetch(`/api/paths/${pathId}`);
-    if (res.status === 404) {
-      setNotFound(true);
-      setPath(null); // Clear path state if it becomes not found later
-      return;
+    try {
+      const res = await fetch(`/api/paths/${pathId}`);
+      if (res.status === 404) {
+        setNotFound(true);
+        setPath(null); // Clear path state if it becomes not found later
+        return;
+      }
+      const json = await res.json();
+      setPath(json.data);
+    } catch (err) {
+      // Gracefully handle network errors without crashing - will retry on next interval
+      console.warn("Failed to fetch path, will retry:", err);
     }
-    const json = await res.json();
-    setPath(json.data);
   }, [pathId]);
 
   useEffect(() => {
@@ -130,6 +153,8 @@ export default function PathRoadmap({ pathId }: PathRoadmapProps) {
     );
   }
 
+  const resolvedPath = path;
+
   const totalVideos = path.topics.reduce((sum, t) => sum + t.videos.length, 0);
   const watchedVideos = path.topics.reduce((sum, t) => sum + t.videos.filter((v) => v.watched).length, 0);
   const pct = totalVideos > 0 ? Math.round((watchedVideos / totalVideos) * 100) : 0;
@@ -150,20 +175,13 @@ export default function PathRoadmap({ pathId }: PathRoadmapProps) {
       {/* A "continue watching" hero card that picks up the most-recently-viewed
           video. This is separate from the active video selection, which follows
           the user's clicks inside the syllabus below. */}
-      {lastWatchedVideo && (
-        <div className="max-w-3xl mx-auto mb-12">
-          <p className="legend-label legend-label--ink mb-3">Continue watching</p>
-          <VideoPlayer video={lastWatchedVideo} />
-        </div>
-      )}
-
       {/* Single sticky player for the whole path — stays pinned to the top of the
           viewport while the syllabus scrolls underneath it. Only rendered on this
           path's own page, and this page 404s for anyone who isn't its owner. */}
-      {path.status === "READY" && <VideoPlayer video={activeVideo} />}
-
+      {/* Pills row + title render above the player (matches the Figma "ai-insider"
+          frame, node 2019:85: pills → title → player), not below it. */}
       <div className="max-w-3xl mx-auto">
-        <div className="flex flex-wrap items-center gap-2 mb-3">
+        <div className="flex flex-wrap items-center justify-center gap-2 mb-3">
           <span className="legend-label legend-label--route">
             {path.status === "GENERATING" ? "Charting route…" : `${pct}% complete`}
           </span>
@@ -173,39 +191,55 @@ export default function PathRoadmap({ pathId }: PathRoadmapProps) {
             {path.topics.length} stops · {totalVideos} videos
           </span>
           {path.status === "READY" && (
-            <button type="button" className="chip chip--sage" aria-label="Share progress to trail log">
-              <span className="chip__dot" />
-              Log to trail log
-            </button>
+            <>
+              <span className="text-[var(--ink-4)]">·</span>
+              <button
+                onClick={handleDelete}
+                disabled={deleting}
+                className="btn btn--ghost disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{ borderColor: "rgba(248,113,113,0.35)", color: "#f87171" }}
+              >
+                {deleting ? "Deleting..." : "Delete Route"}
+              </button>
+            </>
           )}
         </div>
 
-        <div className="flex items-start justify-between gap-4 mb-10 flex-wrap">
+        <div className="flex flex-col items-center gap-4 mb-6 text-center">
           <h1 className="font-display text-3xl sm:text-4xl font-medium leading-tight">
             {path.title}
           </h1>
-          <div className="flex flex-wrap items-center gap-2">
-            {path.status === "READY" && (
-              <button
-                type="button"
-                className="btn btn--sage"
-                aria-label="Request a trail guide for this route"
-              >
-                <span className="presence-dot" />
-                Request trail guide
-              </button>
-            )}
+        </div>
+      </div>
+
+      {/* Render sticky player only when a video is selected */}
+      {path.status === "READY" && activeVideo && <VideoPlayer video={activeVideo} />}
+
+      {/* Resume button card - shows when no active video and user has a last watched video */}
+      {path.status === "READY" && !activeVideo && lastWatchedVideo && (
+        <div className="max-w-3xl mx-auto mb-12">
+          <div className="surface-card p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div>
+              <p className="legend-label legend-label--ink mb-2">Continue watching</p>
+              <h3 className="text-lg font-medium">{lastWatchedVideo.title}</h3>
+              <p className="text-sm text-[var(--text-dim)] mt-1">
+                {lastWatchedVideo.lastPositionSec
+                  ? `Resume at ${Math.round(lastWatchedVideo.lastPositionSec / 60)}m ${Math.round(lastWatchedVideo.lastPositionSec % 60)}s`
+                  : "Start watching"}
+              </p>
+            </div>
             <button
-              onClick={handleDelete}
-              disabled={deleting}
-              className="btn btn--ghost disabled:opacity-50 disabled:cursor-not-allowed"
-              style={{ borderColor: "rgba(248,113,113,0.35)", color: "#f87171" }}
+              type="button"
+              onClick={() => handleSelectVideo(lastWatchedVideo)}
+              className="btn btn--sage whitespace-nowrap"
             >
-              {deleting ? "Deleting..." : "Delete Route"}
+              Resume
             </button>
           </div>
         </div>
+      )}
 
+      <div className="max-w-3xl mx-auto">
         {path.status === "GENERATING" && (
           <div className="surface-card p-5 mb-10">
             <p className="legend-label legend-label--route mb-1.5">In progress</p>
@@ -240,7 +274,7 @@ export default function PathRoadmap({ pathId }: PathRoadmapProps) {
 
         {path.status === "READY" && <RelatedRail field={path.title} />}
 
-        {path.status === "READY" && (
+        {false && resolvedPath.status === "READY" && (
           <section className="section-rail">
             <p className="legend-label legend-label--sage mb-4">
               On the same trail — other hikers right now
@@ -256,7 +290,7 @@ export default function PathRoadmap({ pathId }: PathRoadmapProps) {
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium truncate">Jamal D.</p>
                   <p className="text-xs text-[var(--text-dim)] font-mono">
-                    42% · on stop 3 / {path.topics.length}
+                    42% · on stop 3 / {resolvedPath.topics.length}
                   </p>
                 </div>
                 <button
@@ -278,7 +312,7 @@ export default function PathRoadmap({ pathId }: PathRoadmapProps) {
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium truncate">Sara K.</p>
                   <p className="text-xs text-[var(--text-dim)] font-mono">
-                    71% · on stop {Math.max(1, Math.floor(path.topics.length * 0.7))} / {path.topics.length}
+                    71% · on stop {Math.max(1, Math.floor(resolvedPath.topics.length * 0.7))} / {resolvedPath.topics.length}
                   </p>
                 </div>
                 <button
@@ -323,7 +357,7 @@ export default function PathRoadmap({ pathId }: PathRoadmapProps) {
           </section>
         )}
 
-        {path.status === "READY" && (
+        {false && resolvedPath.status === "READY" && (
           <section className="section-rail">
             <div className="flex flex-wrap items-end justify-between gap-4 mb-4">
               <div>

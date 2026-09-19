@@ -8,12 +8,38 @@ import { useEffect, useState } from "react";
 export default function PathsPage() {
   const [paths, setPaths] = useState<PathSummary[] | null>(null);
 
+  // Fetch paths once on mount
   useEffect(() => {
-    fetch("/api/paths")
-      .then((res) => res.json())
-      .then((json) => setPaths(json.data ?? []))
-      .catch(() => setPaths([]));
+    const fetchPaths = async () => {
+      try {
+        const res = await fetch("/api/paths");
+        const json = await res.json();
+        setPaths(json.data ?? []);
+      } catch (err) {
+        console.warn("Failed to fetch paths:", err);
+      }
+    };
+    fetchPaths();
   }, []);
+
+  // Poll for updates only when there are generating paths
+  useEffect(() => {
+    if (!paths) return;
+    const hasGeneratingPaths = paths.some(path => path.status === "GENERATING");
+    if (!hasGeneratingPaths) return;
+
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch("/api/paths");
+        const json = await res.json();
+        setPaths(json.data ?? []);
+      } catch (err) {
+        console.warn("Failed to fetch paths, will retry:", err);
+      }
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, [paths]);
 
   if (!paths) {
     return (
@@ -64,7 +90,13 @@ export default function PathsPage() {
           </Link>
         </div>
 
-        <PathHistoryList paths={paths} />
+        <PathHistoryList 
+          paths={paths} 
+          onDelete={(deletedId) => {
+            // Remove the deleted path from local state to refresh the list
+            setPaths(paths.filter(path => path.id !== deletedId));
+          }} 
+        />
       </div>
     </main>
   );

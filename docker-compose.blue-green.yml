@@ -1,0 +1,36 @@
+services:
+  blue:
+    image: ${AI_INSIDER_BLUE_IMAGE:?Set AI_INSIDER_BLUE_IMAGE to an immutable image tag}
+    env_file: .env.production
+    restart: unless-stopped
+    expose: ["3000"]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  green:
+    image: ${AI_INSIDER_GREEN_IMAGE:?Set AI_INSIDER_GREEN_IMAGE to an immutable image tag}
+    env_file: .env.production
+    restart: unless-stopped
+    expose: ["3000"]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  nginx:
+    image: nginx:1.27.4-alpine
+    restart: unless-stopped
+    environment:
+      ACTIVE_COLOR: ${ACTIVE_COLOR:?Set ACTIVE_COLOR to blue or green}
+    ports: ["80:80"]
+    volumes:
+      - ./deploy/nginx/default.conf.template:/etc/nginx/templates/default.conf.template:ro
+    depends_on:
+      blue: { condition: service_healthy }
+      green: { condition: service_healthy }

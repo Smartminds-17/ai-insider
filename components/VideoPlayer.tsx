@@ -48,6 +48,7 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
   const [muted, setMuted] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isScrubbing, setIsScrubbing] = useState(false);
+  const [scrubValue, setScrubValue] = useState(0);
 
   // Tracks watch-seconds accumulated since the last flush to the backend.
   const pendingSecondsRef = useRef(0);
@@ -60,13 +61,12 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
 
   const flushProgress = useCallback(() => {
     const v = currentVideoRef.current;
-    const player = playerRef.current;
-    if (!v || !player) return;
+    if (!v || !playerRef.current) return;
     const delta = pendingSecondsRef.current;
     pendingSecondsRef.current = 0;
     if (delta <= 0) return;
 
-    const positionSec = player.getCurrentTime?.() ?? 0;
+    const positionSec = playerRef.current.getCurrentTime?.() ?? 0;
     // navigator.sendBeacon would be ideal on unmount, but fetch keepalive covers it here.
     fetch("/api/progress", {
       method: "POST",
@@ -94,7 +94,7 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
       if (cancelled || !window.YT || !mountRef.current) return;
 
       playerRef.current?.destroy();
-      const player = new window.YT.Player(mountRef.current, {
+      new window.YT.Player(mountRef.current, {
         videoId: video.youtubeVideoId,
         playerVars: {
           // Strip YouTube's native chrome — our own control bar replaces all of it.
@@ -173,12 +173,29 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
 
   if (!video) {
     return (
-      <div className="sticky top-0 z-30 -mx-6 px-6 pb-4 pt-4 bg-[var(--ink)]/95 backdrop-blur border-b border-white/5">
-        <div className="max-w-3xl mx-auto">
-          <div className="aspect-video w-full rounded-2xl bg-[var(--ink-2)] border border-white/10 flex items-center justify-center">
-            <p className="text-sm text-[var(--text-dim)] font-mono">
-              Select a video from the syllabus below to start watching
-            </p>
+      <div className="sticky top-0 z-30 -mx-16 px-16 pb-4 pt-4 bg-[var(--ink)]/80 backdrop-blur-xl">
+        <div className="max-w-4xl mx-auto">
+          <div className="aspect-video w-full rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center">
+            <div className="text-center">
+              <div className="w-14 h-14 rounded-full bg-white/5 border border-white/10 flex items-center justify-center mb-4">
+                <svg
+                  className="w-6 h-6 text-[var(--text-dim)]"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={1.25}
+                    d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 010 1.971l-11.54 6.347a1.125 1.125 0 01-1.667-.985V5.653z"
+                  />
+                </svg>
+              </div>
+              <p className="text-sm text-[var(--text-dim)] font-mono">
+                Select a video from the syllabus below to start watching
+              </p>
+            </div>
           </div>
         </div>
       </div>
@@ -186,25 +203,25 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
   }
 
   const togglePlay = () => {
-    const player = playerRef.current;
-    if (!player) return;
+    if (!playerRef.current) return;
     if (isPlaying) {
-      player.pauseVideo();
+      playerRef.current.pauseVideo();
     } else {
-      player.playVideo();
+      playerRef.current.playVideo();
     }
   };
 
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = Number(e.target.value);
+    setScrubValue(value);
     scrubValueRef.current = value;
-    setCurrentTime(value);
   };
 
   // Shared commit handler for mouse and touch — reads the last scrubbed value
   // rather than the differently-shaped mouse/touch event, so one handler works for both.
   const commitSeek = () => {
     playerRef.current?.seekTo(scrubValueRef.current, true);
+    setCurrentTime(scrubValueRef.current);
     setIsScrubbing(false);
   };
 
@@ -222,13 +239,12 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
   };
 
   const toggleMute = () => {
-    const player = playerRef.current;
-    if (!player) return;
+    if (!playerRef.current) return;
     if (muted) {
-      player.unMute();
+      playerRef.current.unMute();
       setMuted(false);
     } else {
-      player.mute();
+      playerRef.current.mute();
       setMuted(true);
     }
   };
@@ -243,71 +259,84 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
   };
 
   return (
-    <div className="sticky top-0 z-30 -mx-6 px-6 pb-4 pt-4 bg-[var(--ink)]/95 backdrop-blur border-b border-white/5">
-      <div className="max-w-3xl mx-auto">
+    <div className="sticky top-0 z-30 -mx-16 px-16 pb-4 pt-4 bg-[var(--ink)]/80 backdrop-blur-xl">
+      <div className="max-w-4xl mx-auto">
         <div
           ref={wrapperRef}
-          className="relative aspect-video w-full rounded-2xl overflow-hidden bg-black group"
+          className="relative aspect-video w-full rounded-2xl bg-black group border border-white/10 overflow-hidden"
         >
-          {/* YouTube IFrame API mounts its iframe here; playerVars strip all native controls */}
-          <div ref={mountRef} className="w-full h-full pointer-events-none" />
+          <div ref={mountRef} className="w-full h-full" />
 
-          {/* Click-to-play/pause overlay on the video area itself */}
-          <button
-            type="button"
-            aria-label={isPlaying ? "Pause" : "Play"}
-            onClick={togglePlay}
-            className="absolute inset-0 w-full h-full"
-          />
+          {/* Click-to-play overlay, only shown when player is ready but not yet playing */}
+          {!isPlaying && ready && (
+            <button
+              type="button"
+              className="absolute inset-0 w-full h-full flex items-center justify-center bg-black/20"
+              onClick={togglePlay}
+              aria-label="Play video"
+            >
+              <div className="w-20 h-20 rounded-full bg-black/50 flex items-center justify-center">
+                <svg className="w-10 h-10 text-white" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M6.3 20.7c-.4 0-.8-.1-1.1-.4-.6-.5-.9-1.2-.9-2V5.7c0-.8.3-1.5.9-2 .6-.5 1.4-.6 2.1-.3l11.5 6.3c.7.4 1.1 1.1 1.1 1.9s-.4 1.5-1.1 1.9L7.3 20.4c-.3.2-.7.3-1 .3z" />
+                </svg>
+              </div>
+            </button>
+          )}
 
-          {/* Our custom control bar */}
-          <div className="absolute bottom-0 left-0 right-0 px-3 pb-2 pt-8 bg-gradient-to-t from-black/85 via-black/40 to-transparent">
-            <input
-              type="range"
-              min={0}
-              max={duration || 0}
-              step={0.1}
-              value={Math.min(currentTime, duration || 0)}
-              onMouseDown={() => setIsScrubbing(true)}
-              onChange={handleSeek}
-              onMouseUp={commitSeek}
-              onTouchStart={() => setIsScrubbing(true)}
-              onTouchEnd={() => commitSeek()}
-              className="w-full accent-[var(--route)] h-1.5 cursor-pointer mb-2"
-              aria-label="Seek"
-            />
-            <div className="flex items-center gap-3">
-              <button
-                type="button"
-                onClick={togglePlay}
-                aria-label={isPlaying ? "Pause" : "Play"}
-                className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center transition shrink-0"
-              >
+          {/* Custom controls, absolutely positioned over the player iframe */}
+          <div
+            className="absolute bottom-0 left-0 right-0 p-3 bg-gradient-to-t from-black/70 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"
+            style={{
+              // When fullscreen, controls are always visible. Otherwise, they fade in/out on hover.
+              opacity: isFullscreen || isScrubbing ? 1 : undefined,
+            }}
+          >
+            <div className="flex items-center gap-4">
+              <button type="button" onClick={togglePlay} className="text-white">
                 {isPlaying ? (
-                  <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 24 24">
-                    <rect x="6" y="5" width="4" height="14" />
-                    <rect x="14" y="5" width="4" height="14" />
+                  <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
                   </svg>
                 ) : (
-                  <svg className="w-4 h-4 text-white ml-0.5" fill="currentColor" viewBox="0 0 24 24">
+                  <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
                     <path d="M8 5v14l11-7z" />
                   </svg>
                 )}
               </button>
-
-              <span className="font-mono text-xs text-white/90 shrink-0 tabular-nums">
-                {formatDuration(currentTime)} / {formatDuration(duration)}
-              </span>
-
-              <div className="flex items-center gap-1.5 ml-1 shrink-0">
-                <button type="button" onClick={toggleMute} aria-label={muted ? "Unmute" : "Mute"} className="text-white/80 hover:text-white">
-                  {muted || volume === 0 ? (
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 14l2 2m0-2l-2 2M9 9H5a1 1 0 00-1 1v4a1 1 0 001 1h4l5 4V5l-5 4z" />
+              <div className="flex-1 flex items-center gap-3">
+                <span className="text-xs text-white font-mono tabular-nums">
+                  {formatDuration(Math.round(isScrubbing ? scrubValue : currentTime))}
+                </span>
+                <input
+                  type="range"
+                  min={0}
+                  max={duration}
+                  value={isScrubbing ? scrubValue : currentTime}
+                  onChange={handleSeek}
+                  onMouseDown={() => setIsScrubbing(true)}
+                  onMouseUp={commitSeek}
+                  onTouchStart={() => setIsScrubbing(true)}
+                  onTouchEnd={commitSeek}
+                  className="w-full h-1 bg-white/20 rounded-full appearance-none cursor-pointer"
+                  style={{
+                    background: `linear-gradient(to right, white ${
+                      ((isScrubbing ? scrubValue : currentTime) / duration) * 100
+                    }%, rgba(255,255,255,0.2) ${((isScrubbing ? scrubValue : currentTime) / duration) * 100}%)`,
+                  }}
+                />
+                <span className="text-xs text-white font-mono tabular-nums">
+                  {formatDuration(Math.round(duration))}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button type="button" onClick={toggleMute} className="text-white">
+                  {muted ? (
+                    <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M16.5 12A4.5 4.5 0 0014 7.97v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51A8.94 8.94 0 0021 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06a8.99 8.99 0 003.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z" />
                     </svg>
                   ) : (
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072M18.364 5.636a9 9 0 010 12.728M9 9H5a1 1 0 00-1 1v4a1 1 0 001 1h4l5 4V5l-5 4z" />
+                    <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c3.98-.91 7-4.49 7-8.77s-3.02-7.86-7-8.77z" />
                     </svg>
                   )}
                 </button>
@@ -317,39 +346,28 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
                   max={100}
                   value={muted ? 0 : volume}
                   onChange={handleVolume}
-                  className="w-16 accent-[var(--route)] h-1 cursor-pointer"
-                  aria-label="Volume"
+                  className="w-20 h-1 bg-white/20 rounded-full appearance-none cursor-pointer"
+                  style={{
+                    background: `linear-gradient(to right, white ${
+                      muted ? 0 : volume
+                    }%, rgba(255,255,255,0.2) ${muted ? 0 : volume}%)`,
+                  }}
                 />
               </div>
-
-              <p className="text-xs text-white/70 truncate flex-1 min-w-0 hidden sm:block">
-                {video.title}
-              </p>
-
-              <button
-                type="button"
-                onClick={toggleFullscreen}
-                aria-label={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
-                className="text-white/80 hover:text-white shrink-0"
-              >
+              <button type="button" onClick={toggleFullscreen} className="text-white">
                 {isFullscreen ? (
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 15H4v5m0-5l5.5 5.5M15 9h5V4m0 5l-5.5-5.5M9 9H4V4m0 5l5.5-5.5M15 15h5v5m0-5l-5.5 5.5" />
+                  <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z" />
                   </svg>
                 ) : (
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4h4M20 8V4h-4M4 16v4h4m8 0h4v-4" />
+                  <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z" />
                   </svg>
                 )}
               </button>
             </div>
           </div>
         </div>
-        <p className="mt-2 text-sm text-[var(--text-dim)] truncate">
-          <span className="font-medium">{video.title}</span>
-          {" · "}
-          {video.channelTitle}
-        </p>
       </div>
     </div>
   );

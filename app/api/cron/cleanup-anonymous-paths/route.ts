@@ -1,5 +1,13 @@
 import { prisma } from "@/infrastructure/db/prisma";
 import { NextRequest, NextResponse } from "next/server";
+import { timingSafeEqual } from "node:crypto";
+
+function isInternalRequest(req: NextRequest, secret: string) {
+  const provided = req.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? "";
+  const expected = Buffer.from(secret);
+  const received = Buffer.from(provided);
+  return received.length === expected.length && timingSafeEqual(received, expected);
+}
 
 // Cleanup job: Delete all anonymous user paths older than 24 hours
 // Callable via Supabase Cron: POST /api/cron/cleanup-anonymous-paths?secret=YOUR_INTERNAL_API_SECRET
@@ -10,9 +18,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Internal API not configured" }, { status: 500 });
   }
 
-  const { searchParams } = new URL(req.url);
-  const requestSecret = searchParams.get("secret");
-  if (requestSecret !== internalSecret) {
+  if (!isInternalRequest(req, internalSecret)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

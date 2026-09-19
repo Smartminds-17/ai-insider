@@ -82,3 +82,15 @@ export async function verifyProgressOwnership(progressId: string, userId: string
     throw new AuthorizationError("You do not have permission to modify this progress");
   }
 }
+
+/** Ensures progress may only be recorded for a video exposed by the caller's path. */
+export async function verifyVideoAccess(videoId: string, userId: string): Promise<void> {
+  const topicVideo = await prisma.topicVideo.findFirst({
+    where: { videoId, topic: { learningPath: { userId } } },
+    select: { id: true },
+  });
+
+  if (!topicVideo) {
+    throw new AuthorizationError("You do not have permission to access this video");
+  }
+}
