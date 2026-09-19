@@ -22,14 +22,14 @@ const getRedisConnection = () => {
     
     // Build connection config - only use TLS for remote/Upstash Redis
     const connection: {
-      hostname: string;
+      host: string;
       port: number;
       username?: string;
       password?: string;
       tls?: { rejectUnauthorized: boolean };
-    } = {
-      hostname: parsedUrl.hostname,
-      port: parseInt(parsedUrl.port || "6379"),
+      } = {
+        host: parsedUrl.hostname,
+        port: parseInt(parsedUrl.port || "6379"),
     };
     
     // Only add credentials and TLS if they exist in the URL (required for Upstash)
