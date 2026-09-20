@@ -37,13 +37,25 @@ export function scoreVideo(video: CandidateVideo): number {
   return viewScore * 0.4 + durationScore * 0.45 + recencyScore * 0.15;
 }
 
-export function rankVideos(candidates: CandidateVideo[], topN = 5): RankedVideo[] {
+// Ratio applied to the top scorer to decide which other candidates are
+// "genuinely" competitive with it, rather than padding for padding's sake.
+const COVERAGE_SCORE_RATIO = 0.55;
+
+export function rankVideos(candidates: CandidateVideo[], maxVideos = 5): RankedVideo[] {
   const scored = candidates
     .map((video) => ({ ...video, score: scoreVideo(video) }))
     .sort((a, b) => b.score - a.score);
 
   const solid = scored.filter((v) => v.score > 0);
-  const pool = solid.length >= Math.min(2, topN) ? solid : scored;
+  const pool = solid.length > 0 ? solid : scored;
+  if (pool.length === 0) return [];
 
-  return pool.slice(0, topN);
+  // Coverage-based selection: keep whatever scores close to the best
+  // candidate, instead of always padding out to a fixed count. If one video
+  // comprehensively covers the topic, it can be the entire list — there's no
+  // need to also include a shorter "quick version" of the same material.
+  const topScore = pool[0].score;
+  const kept = pool.filter((v) => v.score >= topScore * COVERAGE_SCORE_RATIO);
+
+  return kept.slice(0, maxVideos);
 }

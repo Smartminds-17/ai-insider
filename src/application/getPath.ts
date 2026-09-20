@@ -30,6 +30,7 @@ interface ProgressRow {
   watched: boolean;
   watchedSeconds: number;
   lastPositionSec: number;
+  farthestPositionSec: number;
 }
 
 // 1 hour TTL for anonymous user paths (deleted after refresh/navigate away)
@@ -99,6 +100,7 @@ export async function getPath(pathId: string, userId: string): Promise<PathView 
         watched: watchedSet.has(tv.video.id),
         watchedSeconds: progressByVideoId.get(tv.video.id)?.watchedSeconds ?? 0,
         lastPositionSec: progressByVideoId.get(tv.video.id)?.lastPositionSec ?? 0,
+        farthestPositionSec: progressByVideoId.get(tv.video.id)?.farthestPositionSec ?? 0,
         selected: tv.selected,
         source: tv.source as VideoSource,
       })),

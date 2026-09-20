@@ -64,6 +64,7 @@ export interface PathView {
       watched: boolean;
       watchedSeconds: number;
       lastPositionSec: number;
+      farthestPositionSec: number;
       selected: boolean;
       source: VideoSource;
     }[];

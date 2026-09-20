@@ -87,25 +87,6 @@ export default function PathRoadmap({ pathId }: PathRoadmapProps) {
     return () => clearInterval(interval);
   }, [path, fetchPath]);
 
-  async function handleToggleWatched(videoId: string, watched: boolean) {
-    setPath((prev) =>
-      prev
-        ? {
-            ...prev,
-            topics: prev.topics.map((t) => ({
-              ...t,
-              videos: t.videos.map((v) => (v.id === videoId ? { ...v, watched } : v)),
-            })),
-          }
-        : prev
-    );
-    await fetch("/api/progress", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ videoId, watched }),
-    });
-  }
-
   // If path becomes not found after loading, redirect to /paths
   useEffect(() => {
     if (notFound) {
@@ -156,8 +137,16 @@ export default function PathRoadmap({ pathId }: PathRoadmapProps) {
   const resolvedPath = path;
 
   const totalVideos = path.topics.reduce((sum, t) => sum + t.videos.length, 0);
-  const watchedVideos = path.topics.reduce((sum, t) => sum + t.videos.filter((v) => v.watched).length, 0);
-  const pct = totalVideos > 0 ? Math.round((watchedVideos / totalVideos) * 100) : 0;
+  // Progress is the furthest-watched seconds across every video in the path,
+  // divided by their combined duration — not a count of "fully watched"
+  // videos, so partial progress through a long video still moves the bar.
+  const allPathVideos = path.topics.flatMap((t) => t.videos);
+  const totalDurationSec = allPathVideos.reduce((sum, v) => sum + v.durationSec, 0);
+  const watchedTimeSec = allPathVideos.reduce(
+    (sum, v) => sum + Math.min(v.farthestPositionSec, v.durationSec),
+    0
+  );
+  const pct = totalDurationSec > 0 ? Math.round((watchedTimeSec / totalDurationSec) * 100) : 0;
 
   // Find the most recently-watched video, if any, to power the hero
   const allVideos = path.topics.flatMap((topic) => topic.videos);
@@ -263,7 +252,6 @@ export default function PathRoadmap({ pathId }: PathRoadmapProps) {
               key={topic.id}
               topic={topic}
               isLast={i === path.topics.length - 1}
-              onToggleWatched={handleToggleWatched}
               isExpanded={expandedTopicIndex === i}
               onToggle={() => handleToggleTopic(i)}
               activeVideoId={activeVideo?.id ?? null}

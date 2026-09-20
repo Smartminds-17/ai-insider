@@ -4,7 +4,9 @@ import { generateSyllabus } from "@/infrastructure/llm/syllabusGenerator";
 import { rankVideos } from "@/infrastructure/youtube/rankVideos";
 import { searchVideosForTopic } from "@/infrastructure/youtube/youtubeClient";
 
-const VIDEOS_PER_TOPIC = 5;
+// Upper bound only — rankVideos() will return fewer when a topic is well
+// covered by one or two videos, rather than always padding to this count.
+const MAX_VIDEOS_PER_TOPIC = 5;
 
 /**
  * Fast phase: one Gemini call + two DB writes. Creates the Goal and
@@ -69,7 +71,7 @@ export async function processLearningPathTopics(pathId: string, syllabus: Syllab
       });
 
       const candidates = await searchVideosForTopic(topic.title, 12);
-      const ranked = rankVideos(candidates, VIDEOS_PER_TOPIC);
+      const ranked = rankVideos(candidates, MAX_VIDEOS_PER_TOPIC);
 
       let firstVideoId: string | null = null;
 

@@ -105,6 +105,10 @@ model Progress {
   watchedAt       DateTime?
   watchedSeconds  Int       @default(0)
   lastPositionSec Int       @default(0)
+  // High-water mark: the furthest point ever reached in the video. Only
+  // increases (rewinding doesn't reduce it), so this — not lastPositionSec —
+  // is what path-level "time watched" progress is computed from.
+  farthestPositionSec Int   @default(0)
   updatedAt       DateTime  @updatedAt
   user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   video        Video     @relation(fields: [videoId], references: [id], onDelete: Cascade)

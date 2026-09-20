@@ -7,7 +7,6 @@ import { formatDuration } from "@/lib/formatDuration";
 interface TopicWaypointProps {
   topic: PathView["topics"][number];
   isLast: boolean;
-  onToggleWatched: (videoId: string, watched: boolean) => void;
   isExpanded: boolean;
   onToggle: () => void;
   activeVideoId: string | null;
@@ -17,7 +16,6 @@ interface TopicWaypointProps {
 export default function TopicWaypoint({
   topic,
   isLast,
-  onToggleWatched,
   isExpanded,
   onToggle,
   activeVideoId,
@@ -137,15 +135,19 @@ export default function TopicWaypoint({
                     </p>
                   </div>
                 </button>
-                <label className="flex items-center gap-2 shrink-0 cursor-pointer select-none pr-1">
-                  <input
-                    type="checkbox"
-                    checked={video.watched}
-                    onChange={(e) => onToggleWatched(video.id, e.target.checked)}
-                    className="w-[18px] h-[18px] accent-[var(--route)]"
-                  />
-                  <span className="text-xs font-mono text-[var(--text-dim)] hidden sm:inline">Watched</span>
-                </label>
+                {video.watched && (
+                  <div className="flex items-center gap-1.5 shrink-0 pr-1" title="Watched">
+                    <svg
+                      className="w-[18px] h-[18px] text-[var(--route)]"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                    <span className="text-xs font-mono text-[var(--text-dim)] hidden sm:inline">Watched</span>
+                  </div>
+                )}
               </div>
             );
           })}

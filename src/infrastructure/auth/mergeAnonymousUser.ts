@@ -36,17 +36,33 @@ export async function mergeAnonymousUser(anonUserId: string, authUserId: string)
     const progressTransactions = [];
     
     for (const row of anonProgress) {
-      const progressRow = row as { id: string; videoId: string; watched: boolean; watchedAt?: Date; userId: string };
+      const progressRow = row as {
+        id: string;
+        videoId: string;
+        watched: boolean;
+        watchedAt?: Date;
+        farthestPositionSec: number;
+        userId: string;
+      };
       const existing = await p.progress.findUnique({
         where: { userId_videoId: { userId: authUserId, videoId: progressRow.videoId } },
       });
       if (existing) {
-          const existingProgress = existing as { id: string; watched: boolean };
-          if (progressRow.watched && !existingProgress.watched) {
+          const existingProgress = existing as { id: string; watched: boolean; farthestPositionSec: number };
+          const mergedFarthest = Math.max(existingProgress.farthestPositionSec, progressRow.farthestPositionSec);
+          if (
+            (progressRow.watched && !existingProgress.watched) ||
+            mergedFarthest !== existingProgress.farthestPositionSec
+          ) {
             progressTransactions.push(
               p.progress.update({
                 where: { id: existingProgress.id },
-                data: { watched: true, watchedAt: progressRow.watchedAt ?? new Date() },
+                data: {
+                  farthestPositionSec: mergedFarthest,
+                  ...(progressRow.watched && !existingProgress.watched
+                    ? { watched: true, watchedAt: progressRow.watchedAt ?? new Date() }
+                    : {}),
+                },
               })
             );
           }

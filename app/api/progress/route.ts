@@ -1,4 +1,4 @@
-import { setVideoWatched, updatePlaybackPosition } from "@/application/trackProgress";
+import { updatePlaybackPosition } from "@/application/trackProgress";
 import { getOrCreateUserId } from "@/infrastructure/auth/getOrCreateUserId";
 import { prisma } from "@/infrastructure/db/prisma";
 import { rateLimit, rateLimits } from "@/infrastructure/rate-limit";
@@ -37,13 +37,9 @@ export async function POST(req: NextRequest) {
     throw error;
   }
 
-  // Manual "mark as watched" checkbox toggle (unchanged behavior).
-  if (typeof body?.watched === "boolean") {
-    await setVideoWatched(userId, videoId, body.watched);
-    return NextResponse.json({ data: { videoId, watched: body.watched }, meta: {}, error: null });
-  }
-
   // Streaming update sent periodically by the player while a video plays.
+  // Completion is derived from playback position — there is no manual
+  // "mark as watched" toggle to set here.
   const deltaSeconds = typeof body?.deltaSeconds === "number" ? body.deltaSeconds : null;
   const positionSec = typeof body?.positionSec === "number" ? body.positionSec : null;
 
@@ -56,7 +52,7 @@ export async function POST(req: NextRequest) {
       {
         data: null,
         meta: {},
-        error: { code: "INVALID_INPUT", message: "Provide either watched, or deltaSeconds + positionSec" },
+        error: { code: "INVALID_INPUT", message: "deltaSeconds and positionSec are required" },
       },
       { status: 400 }
     );

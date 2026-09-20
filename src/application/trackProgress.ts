@@ -1,14 +1,8 @@
 import { prisma } from "@/infrastructure/db/prisma";
 
-export async function setVideoWatched(userId: string, videoId: string, watched: boolean) {
-  await prisma.progress.upsert({
-    where: { userId_videoId: { userId, videoId } },
-    update: { watched, watchedAt: watched ? new Date() : null },
-    create: { userId, videoId, watched, watchedAt: watched ? new Date() : null },
-  });
-}
-
-// Update playback position (called every 5-10 seconds while video is playing)
+// Update playback position (called every 5-10 seconds while video is playing).
+// There is no manual "mark as watched" toggle — completion is entirely
+// derived from how far the player has actually reached.
 export async function updatePlaybackPosition(
   userId: string,
   videoId: string,
@@ -22,10 +16,18 @@ export async function updatePlaybackPosition(
   });
   const isWatched = videoDuration?.durationSec && positionSec > videoDuration.durationSec * 0.95;
 
+  const existing = await prisma.progress.findUnique({
+    where: { userId_videoId: { userId, videoId } },
+    select: { farthestPositionSec: true },
+  });
+  // High-water mark: never goes down, even if the user rewinds or re-watches.
+  const farthestPositionSec = Math.max(existing?.farthestPositionSec ?? 0, positionSec);
+
   await prisma.progress.upsert({
     where: { userId_videoId: { userId, videoId } },
-    update: { 
+    update: {
       lastPositionSec: positionSec,
+      farthestPositionSec,
       watchedSeconds: { increment: deltaSeconds },
       // Auto-set watched if user is almost finished
       ...(isWatched && { watched: true, watchedAt: new Date() })
@@ -34,6 +36,7 @@ export async function updatePlaybackPosition(
       userId,
       videoId,
       lastPositionSec: positionSec,
+      farthestPositionSec,
       watchedSeconds: deltaSeconds,
       watched: isWatched || false,
       watchedAt: isWatched ? new Date() : null,

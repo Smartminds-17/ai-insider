@@ -49,7 +49,7 @@ const TIERS: Tier[] = [
     ctaClass: "btn--ghost",
     waypoints: [
       { label: "3 routes / month", desc: "Map one new trail every ~10 days.", included: true },
-      { label: "Progress tracking", desc: "Mark videos watched, waypoints lit up.", included: true },
+      { label: "Progress tracking", desc: "Watch time tracked automatically, waypoints lit up.", included: true },
       { label: "Anonymous or Google", desc: "Save your trails across devices.", included: true },
       { label: "Inspiration rail", desc: "Off-trail videos for detours.", included: true },
       { label: "Community trail logs", desc: "Browse what others shared.", included: false },
