@@ -1,8 +1,9 @@
-import { authOptions } from '@/app/api/auth/[...nextauth]/route';
-import prisma from '@/lib/prisma';
+import { authOptions } from '@/src/infrastructure/auth/auth';
+import { prisma } from '@/infrastructure/db/prisma';
 import Redis from 'ioredis';
 import { getServerSession } from 'next-auth/next';
 import { NextResponse } from 'next/server';
+import WebSocket from 'ws';
 
 // WebSocket connection manager to track active clients
 const clients = new Map<string, Set<WebSocket>>();
@@ -58,7 +59,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'WebSocket upgrade not supported' }, { status: 501 });
   }
 
-  upgrade(request, (ws: WebSocket) => {
+  upgrade(request, async (ws: WebSocket) => {
     // Add client to conversation's client set
     if (!clients.has(conversationId)) {
       clients.set(conversationId, new Set());

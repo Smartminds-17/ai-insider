@@ -26,6 +26,7 @@ model User {
   conversationParticipants ConversationParticipant[]
   sentMessages              Message[]
   messageReactions          MessageReaction[]
+  messageReadReceipts       MessageReadReceipt[] // Track all read receipts for this user
   // Mentorship relations
   mentorProfile             MentorProfile?
   menteeMentorships         Mentorship[]              @relation("MenteeMentorships")

@@ -7,3 +7,5 @@ client_secret_*.json
 .DS_Store.env
 .vercel
 .env*
+AGENT.md
+CLAUDE.md
