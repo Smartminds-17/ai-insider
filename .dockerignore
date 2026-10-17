@@ -8,3 +8,5 @@ npm-debug.log*
 *.tsbuildinfo
 *.rej
 *.patch
+AGENTS.MD
+CLAUDE.MD

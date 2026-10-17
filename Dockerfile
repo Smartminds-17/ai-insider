@@ -1,9 +1,11 @@
 FROM node:22.14.0-alpine AS base
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
+RUN apk add --no-cache openssl
 
 FROM base AS dependencies
 COPY package.json package-lock.json ./
+COPY prisma ./prisma
 RUN npm ci
 
 FROM dependencies AS build

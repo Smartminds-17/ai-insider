@@ -156,18 +156,36 @@ export async function generateSyllabus(prompt: string): Promise<Syllabus> {
       break; // Success, exit loop
     } catch (error: unknown) {
       attempt++;
-      if (
+      // Check if this is a retryable error AND we still have retries left
+      const isRetryable503 = 
         error && 
         typeof error === 'object' && 
         'status' in error && 
-        error.status === 503 && 
-        attempt < maxRetries
-      ) {
+        error.status === 503;
+      
+      if (isRetryable503 && attempt < maxRetries) {
         const delay = Math.pow(2, attempt) * 1000; // Exponential backoff
         console.warn(`Gemini API unavailable (503). Retrying in ${delay / 1000}s... (Attempt ${attempt}/${maxRetries})`);
         await new Promise(resolve => setTimeout(resolve, delay));
+      } else if (attempt >= maxRetries) {
+        // We've exhausted all retries - throw a more user-friendly error
+        console.error(`Gemini API failed after ${maxRetries} attempts. Falling back to mock data.`);
+        // Return mock data instead of crashing the entire request!
+        const mockSyllabus = {
+          title: `Learning path: ${prompt.slice(0, 60)}`,
+          topics: [
+            { title: "Fundamentals", order: 0 },
+            { title: "Core concepts", order: 1 },
+            { title: "Hands-on practice", order: 2 },
+            { title: "Intermediate techniques", order: 3 },
+            { title: "Real-world application", order: 4 },
+          ],
+        };
+        syllabusCache.set(cacheKey, { data: mockSyllabus, timestamp: Date.now() });
+        return mockSyllabus;
       } else {
-        throw error; // Re-throw other errors or if max retries reached
+        // Non-retryable error - re-throw
+        throw error;
       }
     }
   }

@@ -20,6 +20,11 @@ const nextConfig: NextConfig = {
       },
     ],
   },
+  webpack: (config) => {
+    // Exclude native node modules from client-side bundles
+    config.externals = [...(config.externals || []), "@valkey/valkey-glide"];
+    return config;
+  },
   async headers() {
     return [
       {
