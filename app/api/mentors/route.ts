@@ -1,4 +1,5 @@
 import { authOptions } from '@/infrastructure/auth/auth';
+import type { Prisma } from '@prisma/client';
 import { PrismaClient } from '@prisma/client';
 import { getServerSession } from 'next-auth/next';
 import { NextResponse } from 'next/server';
@@ -12,7 +13,7 @@ export async function GET(request: Request) {
     const limit = parseInt(searchParams.get('limit') || '20');
     const page = parseInt(searchParams.get('page') || '1');
 
-    const whereClause: any = { availability: true };
+    const whereClause: Prisma.MentorProfileWhereInput = { availability: true };
     
     if (expertise) {
       whereClause.expertise = { has: expertise };
@@ -21,7 +22,7 @@ export async function GET(request: Request) {
     const mentors = await prisma.mentorProfile.findMany({
       where: whereClause,
       include: {
-        user: { select: { id: true, name: true, image: true, email: true, isOnline: true, lastActiveAt: true } }
+        user: { select: { id: true, name: true, image: true, isOnline: true, lastActiveAt: true } }
       },
       skip: (page - 1) * limit,
       take: limit
@@ -90,7 +91,7 @@ export async function POST(request: Request) {
         availability
       },
       include: {
-        user: { select: { id: true, name: true, image: true, email: true, isOnline: true, lastActiveAt: true } }
+        user: { select: { id: true, name: true, image: true, isOnline: true, lastActiveAt: true } }
       }
     });
 
@@ -121,7 +122,7 @@ export async function PUT(request: Request) {
     const body = await request.json();
     const { bio, expertise, hourlyRate, availability } = body;
 
-    const updateData: any = {};
+    const updateData: Prisma.MentorProfileUpdateInput = {};
     if (bio !== undefined) updateData.bio = bio;
     if (expertise) updateData.expertise = expertise;
     if (hourlyRate) updateData.hourlyRate = parseFloat(hourlyRate);
@@ -132,7 +133,7 @@ export async function PUT(request: Request) {
       where: { userId: currentUser.id },
       data: updateData,
       include: {
-        user: { select: { id: true, name: true, image: true, email: true } }
+        user: { select: { id: true, name: true, image: true } }
       }
     });
 

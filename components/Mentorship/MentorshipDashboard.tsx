@@ -1,17 +1,26 @@
 'use client';
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { useSession } from 'next-auth/react';
 import useSWR from 'swr';
 import MentorshipCard from './MentorshipCard';
 
 const fetcher = (url: string) => fetch(url).then(res => res.json());
 
 export default function MentorshipDashboard() {
-  const { data, error, isLoading } = useSWR('/api/mentorships', fetcher);
+  const { data: session } = useSession();
+  const { data: menteeData, error: menteeError, isLoading: menteeLoading } = useSWR(
+    session?.user?.id ? '/api/mentorships?asMentee=true' : null,
+    fetcher,
+  );
+  const { data: mentorData, error: mentorError, isLoading: mentorLoading } = useSWR(
+    session?.user?.id ? '/api/mentorships?asMentor=true' : null,
+    fetcher,
+  );
 
-  const mentorships = data?.mentorships || [];
-  const asMentee = mentorships.filter((m: any) => m.menteeId === 'current-user-id');
-  const asMentor = mentorships.filter((m: any) => m.mentor.userId === 'current-user-id');
+  const asMentee = Array.isArray(menteeData) ? menteeData : [];
+  const asMentor = Array.isArray(mentorData) ? mentorData : [];
+  const isLoading = menteeLoading || mentorLoading;
 
   if (isLoading) {
     return (
@@ -27,7 +36,7 @@ export default function MentorshipDashboard() {
     );
   }
 
-  if (error) {
+  if (menteeError || mentorError) {
     return (
       <div className="text-center py-12">
         <p className="text-red-400 text-lg">Failed to load your mentorships. Please try again later.</p>
@@ -45,15 +54,15 @@ export default function MentorshipDashboard() {
       <TabsContent value="as-mentee">
         {asMentee.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {asMentee.map((mentorship: any) => (
+            {asMentee.map((mentorship: { id: string }) => (
               <MentorshipCard key={mentorship.id} mentorship={mentorship} isMentee={true} />
             ))}
           </div>
         ) : (
-          <div className="text-center py-12 bg-gray-800 rounded-xl">
-            <h3 className="text-xl font-semibold mb-2">No mentorships yet</h3>
-            <p className="text-gray-400 mb-4">Find a mentor to start your learning journey.</p>
-            <a href="/mentors" className="inline-block px-4 py-2 bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors">
+          <div className="surface-card py-12 text-center">
+            <h3 className="mb-2 text-xl font-medium">No mentorships yet</h3>
+            <p className="mb-4 text-[var(--text-dim)]">Find a mentor to start your learning journey.</p>
+            <a href="/mentors" className="btn btn--route">
               Browse Mentors
             </a>
           </div>
@@ -63,15 +72,15 @@ export default function MentorshipDashboard() {
       <TabsContent value="as-mentor">
         {asMentor.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {asMentor.map((mentorship: any) => (
+            {asMentor.map((mentorship: { id: string }) => (
               <MentorshipCard key={mentorship.id} mentorship={mentorship} isMentee={false} />
             ))}
           </div>
         ) : (
-          <div className="text-center py-12 bg-gray-800 rounded-xl">
-            <h3 className="text-xl font-semibold mb-2">No mentees yet</h3>
-            <p className="text-gray-400 mb-4">Become a mentor to help others on their learning journey.</p>
-            <a href="/dashboard/mentors/create" className="inline-block px-4 py-2 bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors">
+          <div className="surface-card py-12 text-center">
+            <h3 className="mb-2 text-xl font-medium">No mentees yet</h3>
+            <p className="mb-4 text-[var(--text-dim)]">Become a mentor to help others on their learning journey.</p>
+            <a href="/dashboard/mentors/create" className="btn btn--route">
               Create Mentor Profile
             </a>
           </div>

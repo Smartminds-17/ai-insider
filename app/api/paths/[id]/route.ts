@@ -1,4 +1,5 @@
 import { getPath } from "@/application/getPath";
+import { ensureLearningCommunity } from "@/application/learningCommunity";
 import { getOrCreateUserId } from "@/infrastructure/auth/getOrCreateUserId";
 import { prisma } from "@/infrastructure/db/prisma";
 import { NextRequest, NextResponse } from "next/server";
@@ -15,7 +16,21 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     );
   }
 
-  return NextResponse.json({ data: path, meta: {}, error: null });
+  // Backfill an assignment for paths created before topic communities existed.
+  const communityId = await ensureLearningCommunity(userId, path.prompt);
+  const community = communityId
+    ? await prisma.conversation.findUnique({
+        where: { id: communityId },
+        select: { id: true, name: true },
+      })
+    : null;
+
+  // Include only the matched community's name and ID, never another learner's path.
+  return NextResponse.json({
+    data: { ...path, community },
+    meta: {},
+    error: null,
+  });
 }
 
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

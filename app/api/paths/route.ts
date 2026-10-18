@@ -1,4 +1,5 @@
 import { getUserPaths } from "@/application/getUserPaths";
+import { ensureLearningCommunity } from "@/application/learningCommunity";
 import { getOrCreateUserId } from "@/infrastructure/auth/getOrCreateUserId";
 import { prisma } from "@/infrastructure/db/prisma";
 import { queuePathGeneration } from "@/infrastructure/queues/pathGeneration.queue";
@@ -148,6 +149,7 @@ export async function POST(req: NextRequest) {
     
     if (duplicatePath) {
       console.log(`Found existing path for prompt: ${prompt}, returning existing ID: ${duplicatePath.id}`);
+      await ensureLearningCommunity(userId, duplicatePath.prompt);
       return NextResponse.json({ data: { id: duplicatePath.id }, meta: {}, error: null }, { status: 202 });
     }
 
@@ -178,6 +180,12 @@ export async function POST(req: NextRequest) {
      // The frontend will poll for updates on this path
      return NextResponse.json({ data: { id: jobId }, meta: { monthlyUsage: monthlyUsage + 1, monthlyLimit: FREE_TIER_MONTHLY_LIMIT }, error: null }, { status: 202 });
   } catch (err) {
+    if (err instanceof Error && err.message === "RATE_LIMITED") {
+      return NextResponse.json(
+        { data: null, meta: {}, error: { code: "RATE_LIMITED", message: "You have too many paths generating. Please wait for one to finish." } },
+        { status: 429 },
+      );
+    }
     console.error("generatePath failed", err);
     return NextResponse.json(
       { data: null, meta: {}, error: { code: "GENERATION_FAILED", message: "Could not generate path" } },

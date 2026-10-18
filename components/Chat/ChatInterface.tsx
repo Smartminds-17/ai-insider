@@ -80,23 +80,6 @@ export default function ChatInterface() {
     setSelectedConversation(conversation);
   };
 
-  // Handle joining a suggested group
-  const handleJoinGroup = async (groupId: string) => {
-    try {
-      const res = await fetch('/api/conversations/join', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ conversationId: groupId })
-      });
-
-      if (res.ok) {
-        mutateConversations(); // Refresh conversation list to include the new group
-      }
-    } catch (error) {
-      console.error('Error joining group:', error);
-    }
-  };
-
   // Handle auth errors - redirect to login if unauthorized
   useEffect(() => {
     if (conversationsError || (conversations && 'error' in conversations && conversations.error === 'Unauthorized')) {
@@ -107,12 +90,12 @@ export default function ChatInterface() {
 
   if (conversationsError) {
     return (
-      <div className="h-full flex items-center justify-center bg-gray-900 text-white">
+      <div className="surface-card flex h-full items-center justify-center text-[var(--text)]">
         <div className="text-center">
           <p className="text-red-400 mb-4">Failed to load conversations</p>
           <button 
             onClick={() => mutateConversations()}
-            className="px-4 py-2 bg-blue-600 rounded-lg hover:bg-blue-700"
+            className="btn btn--route"
           >
             Retry
           </button>
@@ -123,24 +106,24 @@ export default function ChatInterface() {
 
   if (!conversations) {
     return (
-      <div className="h-full flex items-center justify-center bg-gray-900 text-white">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white"></div>
+      <div className="surface-card flex h-full items-center justify-center text-[var(--text)]">
+        <div className="h-9 w-9 animate-spin rounded-full border-2 border-white/10 border-t-[var(--route)]"></div>
       </div>
     );
   }
 
   return (
-    <div className="flex h-full max-h-screen bg-gray-900 text-white overflow-hidden">
+    <div className="surface-card flex h-full min-h-0 overflow-hidden text-[var(--text)]">
       {/* Sidebar - Conversation List (Discord style servers/channels) */}
-      <div className="w-80 bg-gray-800 border-r border-gray-700 flex flex-col">
-        <div className="p-4 border-b border-gray-700">
-          <h2 className="text-xl font-bold">Messages</h2>
+      <div className="chat-conversation-sidebar flex w-72 shrink-0 flex-col border-r border-white/10 bg-[var(--ink-2)] sm:w-80">
+        <div className="border-b border-white/10 p-4">
+          <p className="legend-label legend-label--route mb-1">Your conversations</p>
+          <h2 className="text-lg font-medium">Messages</h2>
         </div>
         <ConversationList
           conversations={safeConversations}
           selectedId={selectedConversation?.id || null}
           onSelect={handleSelectConversation}
-          onJoinGroup={handleJoinGroup}
         />
       </div>
 
@@ -151,7 +134,7 @@ export default function ChatInterface() {
             <ChatHeader conversation={selectedConversation} />
             
             {/* Messages Container */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            <div className="flex-1 space-y-4 overflow-y-auto p-4 sm:p-6">
               {messages.map((message) => (
                 <MessageBubble key={message.id} message={message} />
               ))}
@@ -166,11 +149,11 @@ export default function ChatInterface() {
             />
           </>
         ) : (
-          <div className="flex-1 flex items-center justify-center text-gray-400">
+          <div className="flex flex-1 items-center justify-center text-[var(--text-dim)]">
             <div className="text-center">
-              <h3 className="text-2xl font-semibold mb-2">Welcome to Chat</h3>
-              <p>Select a conversation to start messaging</p>
-              <p className="text-sm mt-4">Group chats are automatically created for your learning paths</p>
+              <span className="mb-4 inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-[var(--route)]/20 bg-[var(--route)]/10 text-xl text-[var(--route)]" aria-hidden="true">↗</span>
+              <h3 className="mb-2 text-xl font-medium text-[var(--text)]">Choose a conversation</h3>
+              <p className="text-sm">Your messages and learning groups appear here.</p>
             </div>
           </div>
         )}

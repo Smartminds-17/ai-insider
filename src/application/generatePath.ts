@@ -1,4 +1,5 @@
 import type { Syllabus } from "@/domain/types";
+import { assignLearningCommunity } from "@/application/learningCommunity";
 import { prisma } from "@/infrastructure/db/prisma";
 import { generateSyllabus } from "@/infrastructure/llm/syllabusGenerator";
 import { rankVideos } from "@/infrastructure/youtube/rankVideos";
@@ -9,12 +10,9 @@ import { searchVideosForTopic } from "@/infrastructure/youtube/youtubeClient";
 const MAX_VIDEOS_PER_TOPIC = 5;
 
 /**
- * Fast phase: one Gemini call + two DB writes. Creates the Goal and
- * LearningPath rows (status GENERATING) and returns immediately so the
- * caller can hand the user a real path ID right away. Does NOT touch
- * YouTube — that's the slow phase, handled separately by
- * processLearningPathTopics() so it only ever runs once per path
- * regardless of whether a queue is involved.
+ * Fast phase: generate the syllabus, create the Goal and LearningPath, and
+ * create or reuse the learner's topic community in one database transaction.
+ * YouTube sourcing remains in processLearningPathTopics().
  */
 export async function createLearningPath(
   userId: string,
@@ -22,27 +20,31 @@ export async function createLearningPath(
 ): Promise<{ pathId: string; syllabus: Syllabus }> {
   const syllabus = await generateSyllabus(prompt);
 
-  const goal = await prisma.goal.create({
-    data: {
-      userId,
-      prompt,
-      title: syllabus.title,
-      status: "ACTIVE",
-    },
-  });
+  return prisma.$transaction(async (tx) => {
+    const goal = await tx.goal.create({
+      data: {
+        userId,
+        prompt,
+        title: syllabus.title,
+        status: "ACTIVE",
+      },
+    });
 
-  const path = await prisma.learningPath.create({
-    data: {
-      goalId: goal.id,
-      userId,
-      prompt,
-      title: syllabus.title,
-      status: "GENERATING",
-      outline: syllabus as object,
-    },
-  });
+    const path = await tx.learningPath.create({
+      data: {
+        goalId: goal.id,
+        userId,
+        prompt,
+        title: syllabus.title,
+        status: "GENERATING",
+        outline: syllabus as object,
+      },
+    });
 
-  return { pathId: path.id, syllabus };
+    await assignLearningCommunity(tx, userId, prompt);
+
+    return { pathId: path.id, syllabus };
+  });
 }
 
 /**

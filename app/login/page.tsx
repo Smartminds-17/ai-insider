@@ -16,7 +16,7 @@ export default function LoginPage() {
 
   if (status === "loading") {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[var(--bg)] text-[var(--text)]">
+      <div className="flex min-h-[calc(100dvh-64px)] items-center justify-center px-5 py-12 text-[var(--text)]">
         <p>Loading...</p>
       </div>
     );
@@ -29,16 +29,17 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-[var(--bg)] text-[var(--text)]">
-      <div className="w-full max-w-md p-8 rounded-2xl border border-white/10 bg-white/5">
-        <h1 className="text-2xl font-bold text-center mb-2">AI Insider</h1>
+    <main className="flex min-h-[calc(100dvh-64px)] items-center justify-center px-5 py-12 text-[var(--text)]">
+      <div className="surface-card w-full max-w-md p-7 sm:p-9">
+        <span className="legend-label legend-label--route mb-3 block text-center">Welcome back</span>
+        <h1 className="font-display mb-2 text-center text-3xl font-medium">AI Insider</h1>
         <p className="text-center text-white/60 mb-8 text-sm">
           Sign in to save your learning paths and progress
         </p>
 
         <button
           onClick={handleSignIn}
-          className="w-full flex items-center justify-center gap-3 px-4 py-3 rounded-lg bg-white text-gray-900 font-medium hover:bg-gray-100 transition"
+          className="btn w-full justify-center rounded-xl bg-white px-4 py-3 font-medium text-gray-900 transition hover:bg-gray-100"
         >
           <svg className="w-5 h-5" viewBox="0 0 24 24">
             <path
@@ -65,6 +66,6 @@ export default function LoginPage() {
           Your anonymous learning data will be transferred to your account
         </p>
       </div>
-    </div>
+    </main>
   );
 }

@@ -43,9 +43,10 @@ interface PathsResponse {
   }, []);
 
   return (
-    <main className="flex-1 flex flex-col items-center justify-center px-6 py-20 sm:py-28">
-      <div className="w-full max-w-3xl">
-        <div className="flex flex-wrap items-center justify-center gap-2 mb-5">
+    <main className="relative flex-1 overflow-hidden px-5 py-12 sm:px-8 sm:py-20">
+      <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 z-0 h-[560px] opacity-60" style={{ background: "radial-gradient(ellipse at 50% 0%, rgba(232,163,61,.12), transparent 65%)" }} />
+      <div className="relative z-10 mx-auto w-full max-w-5xl">
+        <div className="mb-10 flex flex-wrap items-center justify-center gap-2 sm:mb-14">
           <span className="legend-label legend-label--route">AI Insider</span>
           <span className="text-[var(--ink-4)]">·</span>
           <span className="chip chip--ink">
@@ -55,26 +56,38 @@ interface PathsResponse {
               : `${displayData.totalMonthlyPaths} path${displayData.totalMonthlyPaths !== 1 ? "s" : ""} created this month`
             }
           </span>
-          <span className="chip chip--route">
-            <span className="chip__dot" />
-            Thru-hike plan · Upgrade
-          </span>
         </div>
 
-        <h1 className="font-display text-4xl sm:text-6xl font-medium leading-[1.05] tracking-tight mb-5 text-center">
-          YouTube has the course.
-          <br />
-          You just couldn&apos;t{" "}
-          <span className="text-[var(--route)]">find the trail.</span>
-        </h1>
+        <div className="mx-auto max-w-4xl text-center">
+          <h1 className="font-display mb-6 text-4xl font-medium leading-[1.04] tracking-tight sm:text-6xl lg:text-7xl">
+            YouTube has the course.
+            <br />
+            You just couldn&apos;t{" "}
+            <span className="text-[var(--route)]">find the trail.</span>
+          </h1>
 
-        <p className="text-[var(--text-dim)] text-lg max-w-2xl mx-auto mb-10 leading-relaxed text-center">
-          Tell us what you want to learn. We&apos;ll chart a route through the
-          best videos already out there — ordered, tracked, with other hikers on
-          the same path and trail guides if you want them. Done.
-        </p>
+          <p className="mx-auto mb-10 max-w-2xl text-base leading-relaxed text-[var(--text-dim)] sm:text-lg">
+            Turn a learning goal into a clear sequence of videos. Follow your progress one lesson at a time.
+          </p>
 
-        <PromptForm />
+          <PromptForm />
+        </div>
+
+        <section aria-label="How AI Insider works" className="mx-auto mt-14 grid max-w-4xl gap-3 border-t border-white/10 pt-6 sm:mt-20 sm:grid-cols-3 sm:gap-6 sm:pt-8">
+          {[
+            { number: "01", title: "Name your goal", copy: "Describe what you want to learn." },
+            { number: "02", title: "Get a learning route", copy: "Videos are arranged into a step-by-step path." },
+            { number: "03", title: "Keep moving", copy: "Track progress as you work through each lesson." },
+          ].map((step) => (
+            <div key={step.number} className="flex gap-3 sm:block">
+              <span className="legend-label legend-label--route pt-1 sm:block sm:pb-3">{step.number}</span>
+              <div>
+                <h2 className="mb-1 text-sm font-medium text-[var(--text)]">{step.title}</h2>
+                <p className="text-sm leading-relaxed text-[var(--text-dim)]">{step.copy}</p>
+              </div>
+            </div>
+          ))}
+        </section>
 
         {/* Design-only: Pricing teaser section (hidden per request, uncomment to restore)
         <section className="mt-20">

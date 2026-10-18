@@ -18,15 +18,22 @@ export default function ChatHeader({ conversation }: ChatHeaderProps) {
   const [typingUsers, setTypingUsers] = useState<Map<string, string>>(new Map());
   const { data: session } = useSession();
 
-  // Connect to WebSocket for typing events
+  // Same-origin event streams carry the session cookie for authorization.
   useEffect(() => {
-    if (!session?.user?.email) return;
+    if (!session?.user?.id) return;
 
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(`${wsProtocol}//${window.location.host}/api/ws?conversationId=${conversation.id}`);
-
-    ws.onmessage = (event) => {
-      const data: TypingUser = JSON.parse(event.data);
+    const events = new EventSource(`/api/ws?conversationId=${encodeURIComponent(conversation.id)}`);
+    events.onmessage = (event) => {
+      let data: TypingUser & { conversationId?: string; typingUsers?: unknown[] };
+      try {
+        data = JSON.parse(event.data);
+      } catch {
+        return;
+      }
+      if (Array.isArray(data.typingUsers)) {
+        setTypingUsers(new Map());
+        return;
+      }
       // Don't show typing indicator for current user
       if (data.userId === session.user.id) return;
 
@@ -41,14 +48,14 @@ export default function ChatHeader({ conversation }: ChatHeaderProps) {
       });
     };
 
-    ws.onclose = () => {
+    events.onerror = () => {
       setTypingUsers(new Map());
     };
 
     return () => {
-      ws.close();
+      events.close();
     };
-  }, [conversation.id, session]);
+  }, [conversation.id, session?.user?.id]);
 
   const getConversationName = () => {
     if (conversation.name) return conversation.name;

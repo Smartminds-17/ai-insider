@@ -45,16 +45,16 @@ export default function MentorDirectory() {
           placeholder="Search mentors by name, skill, or bio..."
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
-          className="w-full max-w-md px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-white placeholder-gray-400"
+          className="w-full max-w-lg rounded-xl border border-white/10 bg-[var(--ink-2)] px-4 py-3 text-[var(--text)] placeholder:text-[var(--text-dim)] focus:border-[var(--route)]/50 focus:outline-none focus:ring-1 focus:ring-[var(--route)]/50"
         />
         
         <div className="flex flex-wrap gap-2">
           <button
             onClick={() => setSelectedExpertise(null)}
-            className={`px-3 py-1 rounded-full text-sm transition-colors ${
+            className={`text-sm transition-colors ${
               !selectedExpertise 
-                ? 'bg-blue-600 text-white' 
-                : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                ? 'chip chip--route'
+                : 'chip chip--ink'
             }`}
           >
             All
@@ -63,10 +63,10 @@ export default function MentorDirectory() {
             <button
               key={expertise}
               onClick={() => setSelectedExpertise(expertise)}
-              className={`px-3 py-1 rounded-full text-sm transition-colors ${
+            className={`text-sm transition-colors ${
                 selectedExpertise === expertise
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                  ? 'chip chip--route'
+                  : 'chip chip--ink'
               }`}
             >
               {expertise}

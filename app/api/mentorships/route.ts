@@ -146,9 +146,13 @@ export async function PATCH(request: Request) {
     const body = await request.json();
     const { mentorshipId, status } = body;
 
-    if (!mentorshipId || !status) {
+    if (typeof mentorshipId !== 'string' || !mentorshipId || typeof status !== 'string') {
       return NextResponse.json({ error: 'Mentorship ID and status are required' }, { status: 400 });
     }
+    if (!['ACCEPTED', 'REJECTED', 'CANCELLED'].includes(status)) {
+      return NextResponse.json({ error: 'Invalid mentorship status' }, { status: 400 });
+    }
+    const nextStatus = status as 'ACCEPTED' | 'REJECTED' | 'CANCELLED';
 
     // Verify user has permission to update this mentorship
     const mentorship = await prisma.mentorship.findUnique({
@@ -167,47 +171,63 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: 'Access denied' }, { status: 403 });
     }
 
-    // Only mentors can accept/reject, both can cancel
     if ((status === 'ACCEPTED' || status === 'REJECTED') && !isMentor) {
       return NextResponse.json({ error: 'Only mentors can accept or reject requests' }, { status: 403 });
     }
 
-    if (status === 'CANCELLED' && !isMentor && !isMentee) {
-      return NextResponse.json({ error: 'Only involved parties can cancel mentorships' }, { status: 403 });
+    const transitionAllowed = nextStatus === 'CANCELLED'
+      ? mentorship.status === 'PENDING' || mentorship.status === 'ACCEPTED'
+      : mentorship.status === 'PENDING';
+    if (!transitionAllowed) {
+      return NextResponse.json({ error: 'This mentorship can no longer be updated' }, { status: 409 });
     }
 
-    // Update mentorship
-    const updatedMentorship = await prisma.mentorship.update({
-      where: { id: mentorshipId },
-      data: {
-        status,
-        ...(status === 'ACCEPTED' && { startDate: new Date() })
-      },
-      include: {
-        mentor: { include: { user: { select: { id: true, name: true, image: true } } } },
-        mentee: { select: { id: true, name: true, image: true } }
-      }
-    });
-
-    // If accepted, increment mentor's mentee count
-    if (status === 'ACCEPTED') {
-      await prisma.mentorProfile.update({
-        where: { id: mentorship.mentorId },
-        data: { totalMenteeCount: { increment: 1 } }
+    const updatedMentorship = await prisma.$transaction(async (tx) => {
+      const changed = await tx.mentorship.updateMany({
+        where: { id: mentorshipId, status: mentorship.status },
+        data: { status: nextStatus, ...(nextStatus === 'ACCEPTED' ? { startDate: new Date() } : {}) },
       });
+      if (changed.count !== 1) return null;
 
-      // Auto-create a direct chat between mentor and mentee
-      await prisma.conversation.create({
-        data: {
-          type: 'DIRECT',
-          participants: {
-            create: [
-              { userId: currentUser.id, role: 'MEMBER' },
-              { userId: isMentor ? mentorship.menteeId : mentorship.mentor.userId, role: 'MEMBER' }
-            ]
-          }
+      if (nextStatus === 'ACCEPTED') {
+        await tx.mentorProfile.update({
+          where: { id: mentorship.mentorId },
+          data: { totalMenteeCount: { increment: 1 } },
+        });
+
+        const participantIds = [mentorship.mentor.userId, mentorship.menteeId];
+        const existingConversation = await tx.conversation.findFirst({
+          where: {
+            type: 'DIRECT',
+            AND: [
+              { participants: { some: { userId: participantIds[0] } } },
+              { participants: { some: { userId: participantIds[1] } } },
+              { participants: { every: { userId: { in: participantIds } } } },
+            ],
+          },
+          select: { id: true },
+        });
+        if (!existingConversation) {
+          await tx.conversation.create({
+            data: {
+              type: 'DIRECT',
+              memberCount: 2,
+              participants: { create: participantIds.map((userId) => ({ userId, role: 'MEMBER' })) },
+            },
+          });
         }
+      }
+
+      return tx.mentorship.findUnique({
+        where: { id: mentorshipId },
+        include: {
+          mentor: { include: { user: { select: { id: true, name: true, image: true } } } },
+          mentee: { select: { id: true, name: true, image: true } },
+        },
       });
+    });
+    if (!updatedMentorship) {
+      return NextResponse.json({ error: 'This mentorship was updated by another request' }, { status: 409 });
     }
 
     return NextResponse.json(updatedMentorship);

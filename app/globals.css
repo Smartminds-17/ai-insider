@@ -63,6 +63,36 @@ body {
   background: var(--ink);
   color: var(--text);
   font-family: var(--font-geist-sans), system-ui, sans-serif;
+  min-height: 100dvh;
+}
+
+::selection { background: rgba(232,163,61,.28); color: var(--text); }
+
+:focus-visible {
+  outline: 2px solid var(--route);
+  outline-offset: 3px;
+}
+
+* { scrollbar-color: rgba(154,163,160,.35) transparent; scrollbar-width: thin; }
+
+@media (prefers-reduced-motion: no-preference) {
+  html { scroll-behavior: smooth; }
+}
+
+/* Keep older screens on the same night-trail palette as routes and pricing. */
+.bg-gray-900 { background-color: var(--ink); }
+.bg-gray-800 { background-color: var(--ink-2); }
+.bg-gray-700 { background-color: var(--ink-3); }
+.border-gray-700 { border-color: rgba(255,255,255,.1); }
+.text-gray-400 { color: var(--text-dim); }
+.text-gray-300 { color: #c7ceca; }
+.bg-blue-600 { background-color: var(--route); color: #1a1308; }
+.hover\:bg-blue-700:hover { background-color: #f0b455; }
+.bg-green-600 { background-color: var(--sage); color: #101713; }
+.bg-yellow-600 { background-color: var(--route); color: #1a1308; }
+
+@media (max-width: 639px) {
+  .chat-conversation-sidebar { width: 42%; min-width: 8.5rem; }
 }
 
 .font-display {

@@ -1,72 +1,69 @@
+import { getCommunityRoot } from '@/domain/communityRoot';
+import { authOptions } from '@/infrastructure/auth/auth';
 import { prisma } from '@/src/infrastructure/db/prisma';
 import { getServerSession } from 'next-auth/next';
 import { NextResponse } from 'next/server';
-import { authOptions } from '@/infrastructure/auth/auth';
 
+/** Rejoin only the community matched to a path owned by the current user. */
 export async function POST(request: Request) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.email) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const { conversationId } = await request.json();
-  if (!conversationId) {
-    return NextResponse.json({ error: 'Conversation ID is required' }, { status: 400 });
+  const body = await request.json().catch(() => null);
+  const pathId = typeof body?.pathId === 'string' ? body.pathId : '';
+  if (!pathId) {
+    return NextResponse.json({ error: 'Path ID is required' }, { status: 400 });
   }
 
-  // Get current user with name for system message
   const currentUser = await prisma.user.findUnique({
     where: { email: session.user.email },
-    select: { id: true, name: true }
+    select: { id: true },
   });
-
   if (!currentUser) {
     return NextResponse.json({ error: 'User not found' }, { status: 404 });
   }
 
-  // Check if user is already in the conversation
-  const existingParticipant = await prisma.conversationParticipant.findUnique({
-    where: {
-      conversationId_userId: {
-        conversationId,
-        userId: currentUser.id
-      }
-    }
+  const path = await prisma.learningPath.findFirst({
+    where: { id: pathId, userId: currentUser.id },
+    select: { prompt: true },
   });
+  if (!path) {
+    return NextResponse.json({ error: 'Path not found' }, { status: 404 });
+  }
 
-  if (existingParticipant) {
-    return NextResponse.json({ success: true, message: 'Already in conversation' });
+  const root = getCommunityRoot(path.prompt);
+  if (!root) {
+    return NextResponse.json({ error: 'This path has no specific topic community' }, { status: 409 });
+  }
+
+  const community = await prisma.conversation.findUnique({
+    where: { communityKey: root.key },
+    select: { id: true },
+  });
+  if (!community) {
+    return NextResponse.json({ error: 'No matching community is available' }, { status: 404 });
   }
 
   try {
-    // Add user to the conversation, update memberCount, and create system message atomically
-    await prisma.$transaction([
-      // Add participant
-      prisma.conversationParticipant.create({
-        data: {
-          conversationId,
-          userId: currentUser.id
-        }
-      }),
-      // Increment member count
-      prisma.conversation.update({
-        where: { id: conversationId },
-        data: { memberCount: { increment: 1 } }
-      }),
-      // Create system message to notify everyone the user joined
-      prisma.message.create({
-        data: {
-          conversationId,
-          senderId: currentUser.id,
-          content: `${currentUser.name || 'A new user'} joined the group`,
-          messageType: 'SYSTEM'
-        }
-      })
-    ]);
+    await prisma.$transaction(async (tx) => {
+      const membership = await tx.conversationParticipant.createMany({
+        data: [{ conversationId: community.id, userId: currentUser.id, role: 'MEMBER' }],
+        skipDuplicates: true,
+      });
 
-    return NextResponse.json({ success: true });
+      if (membership.count > 0) {
+        await tx.conversation.update({
+          where: { id: community.id },
+          data: { memberCount: { increment: membership.count } },
+        });
+      }
+    });
+
+    return NextResponse.json({ success: true, communityId: community.id });
   } catch (error) {
-    console.error('Error joining conversation:', error);
-    return NextResponse.json({ error: 'Failed to join conversation' }, { status: 500 });
+    console.error('Error assigning learning community:', error);
+    return NextResponse.json({ error: 'Failed to assign learning community' }, { status: 500 });
   }
 }

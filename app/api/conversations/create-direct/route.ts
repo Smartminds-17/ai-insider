@@ -28,6 +28,14 @@ export async function POST(request: Request) {
     if (!currentUser) {
       return NextResponse.json({ error: 'Current user not found' }, { status: 404 });
     }
+    if (targetUserId === currentUser.id) {
+      return NextResponse.json({ error: 'Cannot create a conversation with yourself' }, { status: 400 });
+    }
+
+    const targetUser = await prisma.user.findUnique({ where: { id: targetUserId }, select: { id: true } });
+    if (!targetUser) {
+      return NextResponse.json({ error: 'User not found' }, { status: 404 });
+    }
 
     // Check if a direct conversation already exists between these two users
     const existingConversation = await prisma.conversation.findFirst({
@@ -35,7 +43,8 @@ export async function POST(request: Request) {
         type: 'DIRECT',
         AND: [
           { participants: { some: { userId: currentUser.id } } },
-          { participants: { some: { userId: targetUserId } } }
+          { participants: { some: { userId: targetUserId } } },
+          { participants: { every: { userId: { in: [currentUser.id, targetUserId] } } } },
         ]
       },
       include: {

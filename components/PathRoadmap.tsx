@@ -1,6 +1,7 @@
 "use client";
 
 import type { PathView } from "@/domain/types";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import RelatedRail from "./RelatedRail";
@@ -160,7 +161,7 @@ export default function PathRoadmap({ pathId }: PathRoadmapProps) {
   }, null as PathVideo | null);
 
   return (
-    <main className="flex-1 px-6 py-16">
+    <main className="flex-1 px-5 py-10 sm:px-8 sm:py-16">
       {/* A "continue watching" hero card that picks up the most-recently-viewed
           video. This is separate from the active video selection, which follows
           the user's clicks inside the syllabus below. */}
@@ -200,6 +201,20 @@ export default function PathRoadmap({ pathId }: PathRoadmapProps) {
           </h1>
         </div>
       </div>
+
+      {path.community && (
+        <aside className="surface-card mx-auto mb-8 flex max-w-3xl flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+          <div className="flex items-start gap-3">
+            <span className="mt-0.5 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[var(--sage)]/10 text-[var(--sage)]" aria-hidden="true">◎</span>
+            <div>
+              <p className="legend-label legend-label--sage mb-1">Your learning community</p>
+              <h2 className="font-medium">{path.community.name}</h2>
+              <p className="mt-1 text-sm text-[var(--text-dim)]">This route has a matching topic community.</p>
+            </div>
+          </div>
+          <Link href="/chat" className="btn btn--sage shrink-0">Open messages <span aria-hidden="true">→</span></Link>
+        </aside>
+      )}
 
       {/* Render sticky player only when a video is selected */}
       {path.status === "READY" && activeVideo && <VideoPlayer video={activeVideo} />}

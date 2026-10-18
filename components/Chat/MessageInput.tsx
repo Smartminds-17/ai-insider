@@ -139,13 +139,13 @@ export default function MessageInput({ onSend, disabled, conversationId }: Messa
   };
 
   return (
-    <div className="border-t border-gray-700 p-4 bg-gray-800">
+    <div className="border-t border-white/10 bg-[var(--ink-2)] p-3 sm:p-4">
       <div className="flex items-end gap-3">
         {/* Attachment button */}
         <div className="relative">
           <button
             onClick={() => setShowAttachments(!showAttachments)}
-            className="p-2 hover:bg-gray-700 rounded-full transition-colors"
+            className="rounded-full p-2 transition-colors hover:bg-white/5"
             disabled={disabled}
           >
             <Plus size={24} className="text-gray-400" />
@@ -204,7 +204,7 @@ export default function MessageInput({ onSend, disabled, conversationId }: Messa
             placeholder={isUploading ? "Uploading file..." : "Type a message..."}
             disabled={disabled || isUploading}
             rows={1}
-            className="w-full bg-gray-700 text-white placeholder-gray-400 rounded-2xl px-4 py-3 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+            className="w-full resize-none rounded-2xl border border-white/10 bg-[var(--ink-3)] px-4 py-3 text-[var(--text)] placeholder:text-[var(--text-dim)] focus:border-[var(--route)]/50 focus:outline-none focus:ring-1 focus:ring-[var(--route)]/50 disabled:opacity-50"
             style={{ minHeight: '48px', maxHeight: '200px' }}
           />
         </div>
@@ -213,12 +213,12 @@ export default function MessageInput({ onSend, disabled, conversationId }: Messa
         <button
           onClick={() => handleSend()}
           disabled={(!message.trim() && !isUploading) || disabled || isUploading}
-          className="p-3 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed rounded-full transition-colors"
+          className="btn btn--route h-12 w-12 rounded-full p-0 disabled:cursor-not-allowed disabled:opacity-40"
         >
           {isUploading ? (
             <Loader2 size={20} className="text-white animate-spin" />
           ) : (
-            <Send size={20} className="text-white" />
+            <Send size={20} />
           )}
         </button>
       </div>

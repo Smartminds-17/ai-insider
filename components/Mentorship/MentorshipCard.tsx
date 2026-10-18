@@ -13,10 +13,10 @@ export default function MentorshipCard({ mentorship, isMentee }: MentorshipCardP
 
   const otherUser = isMentee ? mentorship.mentor.user : mentorship.mentee;
   const statusColors: Record<string, string> = {
-    PENDING: 'bg-yellow-600',
-    ACCEPTED: 'bg-green-600',
-    REJECTED: 'bg-red-600',
-    COMPLETED: 'bg-blue-600'
+    PENDING: 'chip--route',
+    ACCEPTED: 'chip--sage',
+    REJECTED: 'chip--ink',
+    COMPLETED: 'chip--ink'
   };
 
   const updateStatus = async (status: string) => {
@@ -37,7 +37,7 @@ export default function MentorshipCard({ mentorship, isMentee }: MentorshipCardP
   };
 
   return (
-    <div className="bg-gray-800 rounded-xl p-6 border border-gray-700">
+    <article className="surface-card p-5 sm:p-6">
       {/* Header with user and status */}
       <div className="flex items-start gap-4 mb-4">
         <img
@@ -47,14 +47,14 @@ export default function MentorshipCard({ mentorship, isMentee }: MentorshipCardP
         />
         <div className="flex-1">
           <h3 className="font-semibold text-lg">{otherUser.name || 'Unknown User'}</h3>
-          <span className={`inline-block px-2 py-0.5 text-xs rounded-full text-white mt-1 ${statusColors[mentorship.status]}`}>
+          <span className={`chip mt-1 ${statusColors[mentorship.status]}`}>
             {mentorship.status}
           </span>
         </div>
       </div>
 
       {/* Dates and session info */}
-      <div className="space-y-2 mb-4 text-sm text-gray-400">
+      <div className="mb-5 space-y-2 text-sm text-[var(--text-dim)]">
         <div className="flex items-center gap-2">
           <Calendar size={16} />
           <span>Started: {new Date(mentorship.createdAt).toLocaleDateString()}</span>
@@ -74,14 +74,14 @@ export default function MentorshipCard({ mentorship, isMentee }: MentorshipCardP
             <button
               onClick={() => updateStatus('ACCEPTED')}
               disabled={isUpdating}
-              className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 disabled:opacity-50 rounded-lg text-sm font-medium transition-colors"
+              className="btn btn--sage"
             >
               <Check size={16} /> Accept
             </button>
             <button
               onClick={() => updateStatus('REJECTED')}
               disabled={isUpdating}
-              className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 disabled:opacity-50 rounded-lg text-sm font-medium transition-colors"
+              className="btn btn--ink"
             >
               <X size={16} /> Decline
             </button>
@@ -92,12 +92,12 @@ export default function MentorshipCard({ mentorship, isMentee }: MentorshipCardP
           <>
             <a
               href="/chat"
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-sm font-medium transition-colors"
+              className="btn btn--route"
             >
               <MessageCircle size={16} /> Chat
             </a>
             <button
-              className="flex items-center gap-2 px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm font-medium transition-colors"
+              className="btn btn--ink"
             >
               <Calendar size={16} /> Schedule
             </button>
@@ -106,7 +106,7 @@ export default function MentorshipCard({ mentorship, isMentee }: MentorshipCardP
 
         {mentorship.status === 'ACCEPTED' && isMentee && (
           <button
-            className="flex items-center gap-2 px-4 py-2 bg-yellow-600 hover:bg-yellow-700 rounded-lg text-sm font-medium transition-colors"
+              className="btn btn--route"
           >
             <Star size={16} /> Review
           </button>
@@ -116,12 +116,12 @@ export default function MentorshipCard({ mentorship, isMentee }: MentorshipCardP
           <button
             onClick={() => updateStatus('COMPLETED')}
             disabled={isUpdating}
-            className="flex items-center gap-2 px-4 py-2 bg-gray-700 hover:bg-gray-600 disabled:opacity-50 rounded-lg text-sm font-medium transition-colors"
+              className="btn btn--ink"
           >
             Complete Mentorship
           </button>
         )}
       </div>
-    </div>
+    </article>
   );
 }

@@ -1,11 +1,12 @@
 import { authOptions } from '@/infrastructure/auth/auth';
 import { prisma } from '@/src/infrastructure/db/prisma';
+import { createRedisClient } from '@/infrastructure/redis/client';
+import type { Prisma } from '@prisma/client';
 import { getServerSession } from 'next-auth/next';
 import { NextResponse } from 'next/server';
-import Redis from 'ioredis';
+import { timingSafeEqual } from 'node:crypto';
 
-// Initialize Redis for WebSocket event broadcasting
-const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
+const redis = createRedisClient('presence');
 const ONLINE_THRESHOLD_SECONDS = 300; // Consider offline after 5 minutes of inactivity
 
 export async function POST(request: Request) {
@@ -15,11 +16,31 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const body = await request.json();
+    const rawBody = await request.text();
+    let body: { conversationId?: unknown; isTyping?: unknown } = {};
+
+    if (rawBody.trim()) {
+      try {
+        const parsed: unknown = JSON.parse(rawBody);
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+          return NextResponse.json({ error: 'Expected a JSON object' }, { status: 400 });
+        }
+        body = parsed as typeof body;
+      } catch {
+        return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+      }
+    }
+
     const { conversationId, isTyping } = body;
+    if (conversationId !== undefined && typeof conversationId !== 'string') {
+      return NextResponse.json({ error: 'Conversation ID must be a string' }, { status: 400 });
+    }
+    if (isTyping !== undefined && typeof isTyping !== 'boolean') {
+      return NextResponse.json({ error: 'Typing status must be a boolean' }, { status: 400 });
+    }
 
     // Update user's base presence
-    const updateData: any = {
+    const updateData: Prisma.UserUpdateInput = {
       lastActiveAt: new Date()
     };
 
@@ -41,22 +62,27 @@ export async function POST(request: Request) {
       });
 
       if (user) {
-        // Update ConversationParticipant's isTyping status
-        await prisma.conversationParticipant.updateMany({
-          where: {
-            conversationId,
-            userId: user.id
-          },
-          data: { isTyping }
+        const membership = await prisma.conversationParticipant.findFirst({
+          where: { conversationId, userId: user.id },
+          select: { id: true },
         });
-
+        if (!membership) {
+          return NextResponse.json({ error: 'Not a conversation participant' }, { status: 403 });
+        }
+        if (!redis) {
+          return NextResponse.json({ error: 'Typing indicators are unavailable' }, { status: 503 });
+        }
         // Broadcast typing event to all participants via Redis pub/sub
-        await redis.publish('typing-events', JSON.stringify({
-          conversationId,
-          userId: user.id,
-          userName: user.name,
-          isTyping
-        }));
+        try {
+          await redis.publish('typing-events', JSON.stringify({
+            conversationId,
+            userId: user.id,
+            userName: user.name,
+            isTyping
+          }));
+        } catch {
+          return NextResponse.json({ error: 'Typing indicators are unavailable' }, { status: 503 });
+        }
       }
     }
 
@@ -68,7 +94,18 @@ export async function POST(request: Request) {
 }
 
 // Background job to mark inactive users as offline
-export async function GET() {
+function isInternalRequest(request: Request) {
+  const secret = process.env.INTERNAL_API_SECRET;
+  if (!secret) return false;
+  const received = Buffer.from(request.headers.get('authorization')?.replace(/^Bearer\s+/i, '') ?? '');
+  const expected = Buffer.from(secret);
+  return received.length === expected.length && timingSafeEqual(received, expected);
+}
+
+export async function GET(request: Request) {
+  if (!isInternalRequest(request)) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
   try {
     const offlineThreshold = new Date(Date.now() - ONLINE_THRESHOLD_SECONDS * 1000);
     
@@ -80,13 +117,7 @@ export async function GET() {
       data: { isOnline: false }
     });
 
-    // Also reset all isTyping flags (inactive users can't be typing)
-    await prisma.conversationParticipant.updateMany({
-      where: { isTyping: true },
-      data: { isTyping: false }
-    });
-
-    return NextResponse.json({ 
+    return NextResponse.json({
       success: true, 
       usersMarkedOffline: updated.count 
     });

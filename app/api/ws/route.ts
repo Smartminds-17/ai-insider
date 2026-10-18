@@ -1,97 +1,102 @@
-import { authOptions } from '@/src/infrastructure/auth/auth';
+import { authOptions } from '@/infrastructure/auth/auth';
 import { prisma } from '@/infrastructure/db/prisma';
-import Redis from 'ioredis';
+import { createRedisClient } from '@/infrastructure/redis/client';
 import { getServerSession } from 'next-auth/next';
 import { NextResponse } from 'next/server';
-import WebSocket from 'ws';
 
-// WebSocket connection manager to track active clients
-const clients = new Map<string, Set<WebSocket>>();
-const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
+export const runtime = 'nodejs';
 
-// Subscribe to Redis typing events and broadcast to relevant clients
-redis.subscribe('typing-events', (err) => {
-  if (err) console.error('Failed to subscribe to typing-events:', err);
-});
+type TypingEvent = {
+  conversationId: string;
+  userId: string;
+  userName: string | null;
+  isTyping: boolean;
+};
 
-redis.on('message', (channel, message) => {
-  if (channel === 'typing-events') {
-    const event = JSON.parse(message);
-    // Broadcast to all clients subscribed to this conversation
-    const conversationClients = clients.get(event.conversationId) || new Set();
-    conversationClients.forEach((client) => {
-      if (client.readyState === WebSocket.OPEN) {
-        client.send(JSON.stringify(event));
+const encoder = new TextEncoder();
+const clients = new Map<string, Set<ReadableStreamDefaultController<Uint8Array>>>();
+const subscriber = createRedisClient('typing-stream');
+
+if (subscriber) {
+  void subscriber.subscribe('typing-events').catch((error) => {
+    console.error('Failed to subscribe to typing events:', error);
+  });
+
+  subscriber.on('message', (channel, rawMessage) => {
+    if (channel !== 'typing-events') return;
+    try {
+      const event = JSON.parse(rawMessage) as TypingEvent;
+      if (typeof event.conversationId !== 'string' || typeof event.userId !== 'string' || typeof event.isTyping !== 'boolean') return;
+      const payload = encoder.encode(`data: ${JSON.stringify(event)}\n\n`);
+      for (const controller of clients.get(event.conversationId) ?? []) {
+        try {
+          controller.enqueue(payload);
+        } catch {
+          clients.get(event.conversationId)?.delete(controller);
+        }
       }
-    });
-  }
-});
+    } catch {
+      // Ignore malformed pub/sub messages.
+    }
+  });
+}
 
-// Upgrade HTTP connection to WebSocket
 export async function GET(request: Request) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.email) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const { searchParams } = new URL(request.url);
-  const conversationId = searchParams.get('conversationId');
+  if (!subscriber || subscriber.status !== 'ready') {
+    return NextResponse.json({ error: 'Typing indicators are unavailable' }, { status: 503 });
+  }
+
+  const conversationId = new URL(request.url).searchParams.get('conversationId');
   if (!conversationId) {
     return NextResponse.json({ error: 'Conversation ID required' }, { status: 400 });
   }
 
-  // Verify user is a participant in the conversation
   const participant = await prisma.conversationParticipant.findFirst({
-    where: {
-      conversationId,
-      user: { email: session.user.email }
-    }
+    where: { conversationId, user: { email: session.user.email } },
+    select: { id: true },
   });
-
   if (!participant) {
     return NextResponse.json({ error: 'Not a conversation participant' }, { status: 403 });
   }
 
-  // This is a simplified WebSocket setup for Next.js - in production, use a dedicated WebSocket server
-  // For Next.js App Router, we need to use the native WebSocket API with upgrade
-  const { upgrade } = request as any;
-  if (!upgrade) {
-    return NextResponse.json({ error: 'WebSocket upgrade not supported' }, { status: 501 });
-  }
-
-  upgrade(request, async (ws: WebSocket) => {
-    // Add client to conversation's client set
-    if (!clients.has(conversationId)) {
-      clients.set(conversationId, new Set());
-    }
-    clients.get(conversationId)!.add(ws);
-
-    // Clean up when client disconnects
-    ws.on('close', () => {
-      const conversationClients = clients.get(conversationId);
-      if (conversationClients) {
-        conversationClients.delete(ws);
-        if (conversationClients.size === 0) {
-          clients.delete(conversationId);
+  let removeClient = () => {};
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      const conversationClients = clients.get(conversationId) ?? new Set();
+      conversationClients.add(controller);
+      clients.set(conversationId, conversationClients);
+      controller.enqueue(encoder.encode(`data: ${JSON.stringify({ conversationId, typingUsers: [] })}\n\n`));
+      const heartbeat = setInterval(() => {
+        try {
+          controller.enqueue(encoder.encode(': keep-alive\n\n'));
+        } catch {
+          clearInterval(heartbeat);
         }
-      }
-    });
-
-    // Send initial typing status to new client
-    const typingUsers = await prisma.conversationParticipant.findMany({
-      where: { conversationId, isTyping: true },
-      select: { userId: true, user: { select: { name: true } } }
-    });
-
-    typingUsers.forEach((user) => {
-      ws.send(JSON.stringify({
-        conversationId,
-        userId: user.userId,
-        userName: user.user.name,
-        isTyping: true
-      }));
-    });
+      }, 25_000);
+      removeClient = () => {
+        clearInterval(heartbeat);
+        const activeClients = clients.get(conversationId);
+        activeClients?.delete(controller);
+        if (activeClients?.size === 0) clients.delete(conversationId);
+      };
+      request.signal.addEventListener('abort', removeClient, { once: true });
+    },
+    cancel() {
+      removeClient();
+    },
   });
 
-  return new NextResponse(null, { status: 101 }); // Switching protocols
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache, no-transform',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    },
+  });
 }

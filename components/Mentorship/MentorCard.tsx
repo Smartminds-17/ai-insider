@@ -31,7 +31,7 @@ export default function MentorCard({ mentor }: MentorCardProps) {
   };
 
   return (
-    <div className="bg-gray-800 rounded-xl p-6 hover:shadow-lg transition-shadow border border-gray-700">
+    <article className="surface-card flex h-full flex-col p-5 transition hover:-translate-y-0.5 hover:border-white/20 hover:shadow-xl hover:shadow-black/20 sm:p-6">
       {/* Mentor Header */}
       <div className="flex items-start gap-4 mb-4">
         <div className="relative">
@@ -49,7 +49,7 @@ export default function MentorCard({ mentor }: MentorCardProps) {
         </div>
         <div className="flex-1">
           <h3 className="font-semibold text-lg">{mentor.user.name || 'Anonymous Mentor'}</h3>
-          <div className="flex items-center gap-2 text-sm text-gray-400">
+          <div className="flex flex-wrap items-center gap-2 text-sm text-[var(--text-dim)]">
             {mentor.averageRating && (
               <span className="flex items-center gap-1">
                 <Star size={14} className="text-yellow-500 fill-yellow-500" />
@@ -69,7 +69,7 @@ export default function MentorCard({ mentor }: MentorCardProps) {
 
       {/* Bio */}
       {mentor.bio && (
-        <p className="text-gray-300 text-sm mb-4 line-clamp-3">{mentor.bio}</p>
+        <p className="mb-4 line-clamp-3 text-sm leading-relaxed text-[var(--text-dim)]">{mentor.bio}</p>
       )}
 
       {/* Expertise Tags */}
@@ -77,20 +77,20 @@ export default function MentorCard({ mentor }: MentorCardProps) {
         {mentor.expertise?.slice(0, 4).map((skill: string, i: number) => (
           <span
             key={i}
-            className="px-2 py-1 bg-gray-700 text-gray-300 text-xs rounded-full"
+            className="chip chip--ink"
           >
             {skill}
           </span>
         ))}
         {mentor.expertise?.length > 4 && (
-          <span className="px-2 py-1 bg-gray-700 text-gray-400 text-xs rounded-full">
+          <span className="chip chip--ink">
             +{mentor.expertise.length - 4} more
           </span>
         )}
       </div>
 
       {/* Stats */}
-      <div className="flex items-center justify-between pt-4 border-t border-gray-700">
+      <div className="mt-auto flex items-center justify-between border-t border-white/10 pt-4">
         {mentor.hourlyRate && (
           <span className="text-green-400 font-semibold">${mentor.hourlyRate}/hr</span>
         )}
@@ -101,12 +101,12 @@ export default function MentorCard({ mentor }: MentorCardProps) {
       <button
         onClick={requestMentorship}
         disabled={isRequesting || requestSent || !mentor.availability}
-        className={`w-full mt-4 py-2.5 rounded-lg font-medium transition-colors flex items-center justify-center gap-2 ${
+        className={`btn mt-4 w-full justify-center ${
           requestSent
-            ? 'bg-green-600 text-white cursor-default'
+            ? 'btn--sage cursor-default'
             : !mentor.availability
-            ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
-            : 'bg-blue-600 hover:bg-blue-700 text-white'
+            ? 'btn--ink cursor-not-allowed opacity-50'
+            : 'btn--route'
         }`}
       >
         {requestSent ? (
@@ -117,6 +117,6 @@ export default function MentorCard({ mentor }: MentorCardProps) {
           <>Request Mentorship <MessageSquare size={18} /></>
         )}
       </button>
-    </div>
+    </article>
   );
 }

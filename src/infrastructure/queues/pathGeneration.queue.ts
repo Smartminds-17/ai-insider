@@ -89,10 +89,29 @@ if (redisConnection) {
       }
     }
   );
+
+  let queueUnavailableLogged = false;
+  const reportQueueError = (error: Error) => {
+    if (queueUnavailableLogged) return;
+    queueUnavailableLogged = true;
+    console.warn("Path-generation Redis is unavailable; check REDIS_URL.", error.message);
+  };
+  pathGenerationQueue.on("error", reportQueueError);
+  pathGenerationWorker.on("error", reportQueueError);
+  pathGenerationWorker.on("ready", () => {
+    queueUnavailableLogged = false;
+  });
 }
 
 // Helper function to add a new path generation job (uses either BullMQ or in-memory queue)
 export async function queuePathGeneration(userId: string, prompt: string): Promise<{ jobId: string }> {
+  // Reject before creating the path and goal, so throttled attempts leave no rows behind.
+  if (pathGenerationQueue) {
+    const userJobs = await pathGenerationQueue.getJobs(["active", "waiting"]);
+    const userRecentJobs = userJobs.filter((job) => job.data.userId === userId);
+    if (userRecentJobs.length >= 5) throw new Error("RATE_LIMITED");
+  }
+
   // Fast phase runs inline for BOTH environments: one Gemini call + two DB
   // writes, so the frontend gets a real database ID right away.
   const { pathId, syllabus } = await createLearningPath(userId, prompt);
@@ -101,14 +120,6 @@ export async function queuePathGeneration(userId: string, prompt: string): Promi
   let queueAddFailed = false;
   if (pathGenerationQueue) {
     try {
-      // Check rate limit for this user before adding to queue
-      const userJobs = await pathGenerationQueue.getJobs(["active", "waiting"]);
-      const userRecentJobs = userJobs.filter(job => job.data.userId === userId);
-
-      if (userRecentJobs.length >= 5) {
-        throw new Error("RATE_LIMITED");
-      }
-
       // Add job to BullMQ queue to process in background. Pass the syllabus we
       // already generated so the worker doesn't call Gemini a second time.
       await pathGenerationQueue.add(

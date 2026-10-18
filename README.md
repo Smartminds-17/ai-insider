@@ -29,7 +29,7 @@ app/
   page.tsx             # prompt entry screen
   path/[id]/page.tsx    # roadmap view
   api/                  # route handlers — thin, delegate to application/ use-cases
-components/            # PromptForm, PathRoadmap, TopicWaypoint, VideoEmbed, RelatedRail
+components/            # PromptForm, PathRoadmap, PathHero, TopicWaypoint, VideoEmbed, RelatedRail
 ```
 
 API routes never talk to Prisma/YouTube/Gemini directly — they call into
@@ -64,6 +64,13 @@ touches one file each.
    ```
    Visit http://localhost:3000
 
+6. **Build for production**
+   ```bash
+   npm run build
+   npm start
+   ```
+   The project is CI-ready with `npm run lint` exiting with 0 errors for automated deployments.
+
 ## Deliberately not available yet
 
 No billing, plans, payments, mentor sessions, community, team features, or
@@ -83,6 +90,25 @@ verified against a non-production environment.
 ## Changelog
 
 All notable changes to this project will be documented in this file.
+
+## [0.2.0] - 2026-09-20
+### Added
+- **Time-based progress tracking**: Implemented high-water mark `farthestPositionSec` that never decreases, even if users rewind videos
+- **Path-level progress calculations**: Path completion now calculated as total watched time / total path duration, replacing simple video count metrics
+- **Continue Watching hero component**: New `PathHero.tsx` that surfaces the next video to watch, prioritizing in-progress videos over unwatched ones
+- **Coverage-based video selection**: `rankVideos()` now selects videos by relative score rather than fixed count, allowing comprehensive single videos to cover entire topics
+- **Anonymous user progress merging**: `mergeAnonymousUser` properly preserves watch progress when converting anonymous sessions to signed-in accounts
+- **New database fields**: Added `watchedSeconds`, `lastPositionSec`, and `updatedAt` to Progress model for granular time tracking
+
+### Changed
+- **Removed manual watch toggles**: Eliminated manual "mark as watched" functionality - completion is now automatically derived from playback position
+- **Updated progress tracking logic**: `updatePlaybackPosition()` replaces legacy `setVideoWatched()` with continuous time-based tracking
+- **Codebase cleanup**: Removed 3 orphaned use-cases (`addInspiration.ts`, `listGoals.ts`, `selectTutorial.ts`) that were no longer wired to any UI or API routes
+- **Lint compliance**: Fixed React hooks warnings in `RelatedRail.tsx`, achieving 0 eslint errors
+
+### Fixed
+- **Stale state warnings**: Added cancellation flags to prevent stale fetches from overwriting component state
+- **CI pipeline readiness**: `npm run lint` now exits successfully with 0 errors, enabling automated CI/CD workflows
 
 ## [0.1.0] - 2026-09-05
 ### Added
@@ -123,6 +149,12 @@ We've implemented critical fixes to resolve concurrency, rate-limit, and perform
 ### 4. Gemini API Rate Limiter Fix
 - **Problem**: Original config had 19 requests/day limit, causing 76-minute waits between requests.
 - **Solution**: Updated Gemini rate limiter to 15 requests/minute (`src/infrastructure/llm/syllabusGenerator.ts`) to align with Anthropic's free tier limits.
+
+## Recently completed
+- **✓ Time-based progress tracking**: Fully implemented with high-water mark, path-level progress calculations, and automatic watch detection
+- **✓ Continue Watching hero**: `PathHero.tsx` component now surfaces next video to watch with resume functionality
+- **✓ Codebase cleanup**: Removed all orphaned use-cases, achieved 0 eslint errors, CI pipeline ready
+- **✓ Coverage-based video selection**: Intelligent video ranking that can select single comprehensive videos for topics
 
 ## Where to extend next
 

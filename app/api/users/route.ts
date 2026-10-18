@@ -30,32 +30,16 @@ export async function GET() {
         id: true,
         name: true,
         image: true,
-        email: true,
         isOnline: true,
-        lastActiveAt: true,
-        mentorProfile: {
-          select: {
-            availability: true,
-            expertise: true,
-            averageRating: true
-          }
-        }
       },
       orderBy: [
         { isOnline: 'desc' },
         { lastActiveAt: 'desc' }
-      ]
+      ],
+      take: 100,
     });
 
-    // Transform users to add isMentor flag for easier client-side use
-    const transformedUsers = users.map(user => ({
-      ...user,
-      isMentor: !!user.mentorProfile,
-      mentorAvailability: user.mentorProfile?.availability,
-      mentorRating: user.mentorProfile?.averageRating ? Number(user.mentorProfile.averageRating) : null
-    }));
-
-    return NextResponse.json(transformedUsers);
+    return NextResponse.json(users);
   } catch (error) {
     console.error('Error fetching users:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

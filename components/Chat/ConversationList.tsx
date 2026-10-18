@@ -1,9 +1,8 @@
 'use client';
 
 import { Conversation } from '@/types/chat';
-import { X } from 'lucide-react';
 import { useSession } from 'next-auth/react';
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import useSWR from 'swr';
 
 // Define User interface for the /api/users response
@@ -11,12 +10,7 @@ interface User {
   id: string;
   name: string | null;
   image: string | null;
-  email: string | null;
   isOnline: boolean;
-  lastActiveAt: string | null;
-  isMentor: boolean;
-  mentorAvailability?: string | null;
-  mentorRating?: number | null;
 }
 
 // Extend NextAuth session type to include user ID
@@ -31,66 +25,23 @@ declare module "next-auth" {
   }
 }
 
-interface SuggestedGroup {
-  id: string;
-  name: string;
-  description?: string;
-  imageUrl?: string;
-  memberCount: number;
-  topicTags: string[];
-  lastActivityAt: string;
-  matchReason: string;
-}
-
 interface ConversationListProps {
   conversations: Conversation[];
   selectedId: string | null;
   onSelect: (conversation: Conversation) => void;
-  onJoinGroup: (groupId: string) => void;
 }
 
-export default function ConversationList({ conversations, selectedId, onSelect, onJoinGroup }: ConversationListProps) {
+export default function ConversationList({ conversations, selectedId, onSelect }: ConversationListProps) {
   // Separate group chats (communities) and direct chats
   const groupConversations = conversations.filter(c => c.type === 'GROUP');
   const directConversations = conversations.filter(c => c.type === 'DIRECT');
-  const [suggestedGroups, setSuggestedGroups] = useState<SuggestedGroup[]>([]);
-  const [dismissedGroups, setDismissedGroups] = useState<Set<string>>(new Set());
-
-  // Fetch suggested groups on component mount
-  useEffect(() => {
-    const fetchSuggestions = async () => {
-      try {
-        const res = await fetch('/api/groups/suggestions');
-        if (res.ok) {
-          const groups = await res.json() as SuggestedGroup[];
-          setSuggestedGroups(groups.filter((g: SuggestedGroup) => !dismissedGroups.has(g.id)));
-        }
-      } catch (err) {
-        console.error('Failed to fetch group suggestions:', err);
-      }
-    };
-    fetchSuggestions();
-  }, [conversations]);
-
-  const handleDismiss = (groupId: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    setDismissedGroups(prev => new Set([...prev, groupId]));
-    setSuggestedGroups(prev => prev.filter(g => g.id !== groupId));
-  };
-
-  const handleJoinGroup = async (groupId: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    await onJoinGroup(groupId);
-    setSuggestedGroups(prev => prev.filter(g => g.id !== groupId));
-  };
-
   const { data: session } = useSession();
   
   // SWR fetcher for API calls
   const fetcher = (url: string) => fetch(url).then(res => res.json());
   
   // Fetch all users from the new API endpoint
-  const { data: allUsers, error: usersError } = useSWR<User[]>('/api/users', fetcher);
+  const { data: allUsers } = useSWR<User[]>('/api/users', fetcher);
   
   // Function to create a new direct conversation with a user
   const createDirectConversation = async (targetUserId: string) => {
@@ -141,9 +92,6 @@ export default function ConversationList({ conversations, selectedId, onSelect, 
 
   const currentUserId = getCurrentUserId();
 
-  // Use the allUsers data from our API, which is already sorted with online users first
-  const users = allUsers || [];
-
   const isOtherUserOnline = (conversation: Conversation) => {
     if (conversation.type !== 'DIRECT' || !currentUserId) return false;
     const otherUser = conversation.participants?.find(p => p.user.id !== currentUserId);
@@ -159,53 +107,13 @@ export default function ConversationList({ conversations, selectedId, onSelect, 
 
   return (
     <div className="flex-1 overflow-y-auto">
-      {/* Suggested Groups Section (ML/Rule-based recommendations) */}
-      {suggestedGroups.length > 0 && (
-        <div className="p-2 border-b border-gray-700">
-          <h3 className="text-xs font-semibold text-blue-400 uppercase tracking-wider px-2 py-1">
-            Suggested for you
-          </h3>
-          {suggestedGroups.map((group) => (
-            <div
-              key={group.id}
-              className="w-full px-3 py-2 rounded-md mb-1 bg-blue-900/20 border border-blue-800/30"
-            >
-              <div className="flex items-start gap-3">
-                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-cyan-400 flex items-center justify-center text-xs font-bold text-white">
-                  {group.name?.charAt(0) || '#'}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium text-sm text-gray-200 truncate">{group.name}</p>
-                  <p className="text-xs text-gray-400">{group.matchReason}</p>
-                  <p className="text-xs text-gray-500 mt-1">{group.memberCount} members</p>
-                  <div className="flex gap-2 mt-2">
-                    <button
-                      onClick={(e) => handleJoinGroup(group.id, e)}
-                      className="text-xs px-2 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded transition-colors"
-                    >
-                      Join
-                    </button>
-                    <button
-                      onClick={(e) => handleDismiss(group.id, e)}
-                      className="text-xs px-2 py-1 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded transition-colors flex items-center gap-1"
-                    >
-                      <X size={12} /> Dismiss
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Communities / Group Chats Section (Discord style) */}
-      {groupConversations.length > 0 && (
-        <div className="p-2">
-          <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider px-2 py-1">
-            Your Communities
-          </h3>
-          {groupConversations.map((conversation) => (
+      {/* Only communities the current user participates in are listed here. */}
+      <div className="border-b border-white/5 p-2">
+        <h3 className="legend-label legend-label--sage px-2 py-1">
+          Your learning communities
+        </h3>
+        {groupConversations.length > 0 ? (
+          groupConversations.map((conversation) => (
             <button
               key={conversation.id}
               onClick={() => onSelect(conversation)}
@@ -216,7 +124,7 @@ export default function ConversationList({ conversations, selectedId, onSelect, 
               }`}
             >
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center text-sm font-bold">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--route)]/10 text-sm font-semibold text-[var(--route)]">
                   {conversation.name?.charAt(0) || '#'}
                 </div>
                 <div className="flex-1 min-w-0">
@@ -225,9 +133,13 @@ export default function ConversationList({ conversations, selectedId, onSelect, 
                 </div>
               </div>
             </button>
-          ))}
-        </div>
-      )}
+          ))
+        ) : (
+          <p className="px-2 py-2 text-xs leading-relaxed text-[var(--text-dim)]">
+            No learning community conversations yet.
+          </p>
+        )}
+      </div>
 
       {/* Direct Messages Section */}
       {directConversations.length > 0 && (
@@ -312,9 +224,9 @@ export default function ConversationList({ conversations, selectedId, onSelect, 
       )}
 
       {conversations.length === 0 && (
-        <div className="p-4 text-center text-gray-400">
-          <p>No conversations yet</p>
-          <p className="text-sm mt-2">Join a learning path to get access to community chats!</p>
+        <div className="m-2 rounded-xl border border-white/10 bg-white/[0.02] p-4 text-center text-[var(--text-dim)]">
+          <p className="text-sm font-medium text-[var(--text)]">No conversations yet</p>
+          <p className="mt-2 text-xs leading-relaxed">Your learning communities and direct messages will appear here.</p>
         </div>
       )}
     </div>

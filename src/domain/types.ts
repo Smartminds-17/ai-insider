@@ -49,6 +49,7 @@ export interface PathView {
   title: string;
   prompt: string;
   status: PathStatus;
+  community?: { id: string; name: string } | null;
   topics: {
     id: string;
     title: string;

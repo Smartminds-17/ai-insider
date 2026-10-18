@@ -48,7 +48,6 @@ export async function GET() {
             sender: { select: { id: true, name: true, image: true } }
           }
         },
-        learningPath: { select: { id: true, title: true } }
       }
     });
 
@@ -70,7 +69,18 @@ export async function GET() {
       return new Date(b.lastMessageAt || 0).getTime() - new Date(a.lastMessageAt || 0).getTime();
     });
 
-    return NextResponse.json(processedConversations);
+    const visibleConversations = processedConversations.map((conversation) => {
+      const {
+        _sortKey,
+        learningPathId,
+        topicTags,
+        communityKey,
+        ...visibleConversation
+      } = conversation;
+      return visibleConversation;
+    });
+
+    return NextResponse.json(visibleConversations);
   } catch (error) {
     console.error('Error fetching conversations:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
@@ -93,24 +103,38 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
-    const body = await request.json();
-    const { type, participantIds, learningPathId, name } = body;
+    const body = await request.json().catch(() => null);
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: 'Expected a JSON object' }, { status: 400 });
+    }
+    const { type, participantIds, learningPathId, name } = body as {
+      type?: unknown;
+      participantIds?: unknown;
+      learningPathId?: unknown;
+      name?: unknown;
+    };
 
     // Create direct chat (1:1)
     if (type === 'DIRECT') {
-      if (!participantIds || participantIds.length !== 1) {
+      if (!Array.isArray(participantIds) || participantIds.length !== 1 || typeof participantIds[0] !== 'string') {
         return NextResponse.json({ error: 'Direct chat requires exactly one participant' }, { status: 400 });
       }
+      const targetUserId = participantIds[0];
+      if (targetUserId === currentUser.id) {
+        return NextResponse.json({ error: 'Cannot create a conversation with yourself' }, { status: 400 });
+      }
+      const targetUser = await prisma.user.findUnique({ where: { id: targetUserId }, select: { id: true } });
+      if (!targetUser) return NextResponse.json({ error: 'User not found' }, { status: 404 });
 
       // Check if conversation already exists between these two users
       const existingConversation = await prisma.conversation.findFirst({
         where: {
           type: 'DIRECT',
-          participants: {
-            every: {
-              userId: { in: [currentUser.id, participantIds[0]] }
-            }
-          }
+          AND: [
+            { participants: { every: { userId: { in: [currentUser.id, targetUserId] } } } },
+            { participants: { some: { userId: currentUser.id } } },
+            { participants: { some: { userId: targetUserId } } },
+          ],
         }
       });
 
@@ -125,7 +149,7 @@ export async function POST(request: Request) {
           participants: {
             create: [
               { userId: currentUser.id, role: 'MEMBER' },
-              { userId: participantIds[0], role: 'MEMBER' }
+              { userId: targetUserId, role: 'MEMBER' }
             ]
           }
         },
@@ -142,9 +166,34 @@ export async function POST(request: Request) {
     
     // Create group chat (can be auto-created for learning paths)
     if (type === 'GROUP') {
-      const allParticipants = participantIds || [];
-      if (!allParticipants.includes(currentUser.id)) {
-        allParticipants.push(currentUser.id);
+      if (participantIds !== undefined && (!Array.isArray(participantIds) || participantIds.some((id) => typeof id !== 'string'))) {
+        return NextResponse.json({ error: 'Participant IDs must be strings' }, { status: 400 });
+      }
+      if (Array.isArray(participantIds) && participantIds.length > 99) {
+        return NextResponse.json({ error: 'A group can have at most 100 participants' }, { status: 400 });
+      }
+      const allParticipants = [...new Set([...(Array.isArray(participantIds) ? participantIds as string[] : []), currentUser.id])];
+      if (allParticipants.length !== 1) {
+        return NextResponse.json({ error: 'Add members through an invitation they accept' }, { status: 400 });
+      }
+      if (learningPathId !== undefined && (typeof learningPathId !== 'string' || !learningPathId)) {
+        return NextResponse.json({ error: 'Invalid learning path ID' }, { status: 400 });
+      }
+      if (typeof name === 'string' && name.trim().length > 80) {
+        return NextResponse.json({ error: 'Group name must be 80 characters or fewer' }, { status: 400 });
+      }
+      if (learningPathId) {
+        const ownedPath = await prisma.learningPath.findFirst({
+          where: { id: learningPathId, userId: currentUser.id },
+          select: { id: true },
+        });
+        if (!ownedPath) return NextResponse.json({ error: 'Learning path not found' }, { status: 404 });
+      }
+      if (allParticipants.length > 1) {
+        const validUsers = await prisma.user.count({ where: { id: { in: allParticipants } } });
+        if (validUsers !== allParticipants.length) {
+          return NextResponse.json({ error: 'One or more participants were not found' }, { status: 404 });
+        }
       }
 
       // If it's a learning path group, check if it already exists
@@ -166,21 +215,21 @@ export async function POST(request: Request) {
           });
 
           if (!isMember) {
-            await prisma.conversationParticipant.create({
-              data: {
-                conversationId: existingGroup.id,
-                userId: currentUser.id,
-                role: 'MEMBER'
-              }
-            });
-
-            // Add system message
-            await prisma.message.create({
-              data: {
-                conversationId: existingGroup.id,
-                senderId: currentUser.id,
-                content: `${currentUser.name || 'A new user'} joined the group`,
-                messageType: 'SYSTEM'
+            await prisma.$transaction(async (tx) => {
+              const membership = await tx.conversationParticipant.createMany({
+                data: [{ conversationId: existingGroup.id, userId: currentUser.id, role: 'MEMBER' }],
+                skipDuplicates: true,
+              });
+              if (membership.count) {
+                await tx.conversation.update({ where: { id: existingGroup.id }, data: { memberCount: { increment: 1 } } });
+                await tx.message.create({
+                  data: {
+                    conversationId: existingGroup.id,
+                    senderId: currentUser.id,
+                    content: `${currentUser.name || 'A new user'} joined the group`,
+                    messageType: 'SYSTEM'
+                  }
+                });
               }
             });
           }
@@ -190,7 +239,9 @@ export async function POST(request: Request) {
       }
 
       // Create new group conversation
-      const groupName = name || (learningPathId ? 'Learning Community' : 'New Group');
+      const groupName = typeof name === 'string' && name.trim()
+        ? name.trim()
+        : (learningPathId ? 'Learning Community' : 'New Group');
 
       // Generate topicTags from learning path if available
       let topicTags: string[] = [];
@@ -211,9 +262,9 @@ export async function POST(request: Request) {
       learningPathId: learningPathId || null,
       topicTags: topicTags,
       participants: {
-        create: allParticipants.map((userId: string, index: number) => ({
+        create: allParticipants.map((userId: string) => ({
           userId,
-          role: index === 0 ? 'ADMIN' : 'MEMBER' // First user is admin
+          role: userId === currentUser.id ? 'ADMIN' : 'MEMBER'
         }))
       }
     },
