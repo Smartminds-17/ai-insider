@@ -1,16 +1,19 @@
 import { Image as ImageIcon, Loader2, Paperclip, Plus, Send, Smile } from 'lucide-react';
 import { KeyboardEvent, useCallback, useRef, useState } from 'react';
+import type { Message } from '@/types/chat';
 
 interface MessageInputProps {
   onSend: (content: string, options?: { fileUrl?: string; fileName?: string; fileSize?: number; messageType?: 'TEXT' | 'IMAGE' | 'FILE' }) => void;
+  onUploadComplete: (message: Message) => void;
   disabled: boolean;
   conversationId: string;
 }
 
-export default function MessageInput({ onSend, disabled, conversationId }: MessageInputProps) {
+export default function MessageInput({ onSend, onUploadComplete, disabled, conversationId }: MessageInputProps) {
   const [message, setMessage] = useState('');
   const [showAttachments, setShowAttachments] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadError, setUploadError] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -74,6 +77,7 @@ export default function MessageInput({ onSend, disabled, conversationId }: Messa
     
     setIsUploading(true);
     setShowAttachments(false);
+    setUploadError('');
 
     try {
       // Create form data for upload
@@ -89,12 +93,15 @@ export default function MessageInput({ onSend, disabled, conversationId }: Messa
       });
 
       if (res.ok) {
-        const message = await res.json();
-        // The API already created the message, so we just need to refresh the messages list
-        // handleSend will be called by the parent component's message subscription
+        const uploadedMessage = await res.json() as Message;
+        onUploadComplete(uploadedMessage);
+      } else {
+        const result = await res.json().catch(() => null);
+        setUploadError(result?.error || 'Image upload failed. Please try again.');
       }
     } catch (err) {
       console.error('Failed to upload image:', err);
+      setUploadError('Image upload failed. Check your connection and try again.');
     } finally {
       setIsUploading(false);
       if (imageInputRef.current) {
@@ -110,6 +117,7 @@ export default function MessageInput({ onSend, disabled, conversationId }: Messa
     
     setIsUploading(true);
     setShowAttachments(false);
+    setUploadError('');
 
     try {
       // Create form data for upload
@@ -125,11 +133,15 @@ export default function MessageInput({ onSend, disabled, conversationId }: Messa
       });
 
       if (res.ok) {
-        const message = await res.json();
-        // The API already created the message, so we just need to refresh the messages list
+        const uploadedMessage = await res.json() as Message;
+        onUploadComplete(uploadedMessage);
+      } else {
+        const result = await res.json().catch(() => null);
+        setUploadError(result?.error || 'File upload failed. Please try again.');
       }
     } catch (err) {
       console.error('Failed to upload file:', err);
+      setUploadError('File upload failed. Check your connection and try again.');
     } finally {
       setIsUploading(false);
       if (fileInputRef.current) {
@@ -140,6 +152,7 @@ export default function MessageInput({ onSend, disabled, conversationId }: Messa
 
   return (
     <div className="border-t border-white/10 bg-[var(--ink-2)] p-3 sm:p-4">
+      {uploadError && <p role="alert" className="mb-2 text-sm text-red-400">{uploadError}</p>}
       <div className="flex items-end gap-3">
         {/* Attachment button */}
         <div className="relative">

@@ -144,6 +144,12 @@ export default function ChatInterface() {
             {/* Message Input */}
             <MessageInput 
               onSend={sendMessage} 
+              onUploadComplete={(uploadedMessage) => {
+                setMessages((previous) => previous.some((message) => message.id === uploadedMessage.id)
+                  ? previous
+                  : [...previous, uploadedMessage]);
+                mutateConversations();
+              }}
               disabled={isLoading} 
               conversationId={selectedConversation.id} 
             />
