@@ -8,31 +8,28 @@ datasource db {
 }
 
 model User {
-  id            String                     @id @default(uuid())
-  createdAt     DateTime                   @default(now())
-  updatedAt     DateTime                   @updatedAt
-  lastActiveAt  DateTime?                  // Track last activity for online status
-  isOnline      Boolean                    @default(false) // Real-time online flag
-  email         String?                    @unique
-  emailVerified DateTime?
-  image         String?
-  name          String?
-  goals         Goal[]
-  paths         LearningPath[]
-  progress      Progress[]
-  sessions      Session[]
-  accounts      Account[]
-  // Chat relations
+  id                       String                    @id @default(uuid())
+  createdAt                DateTime                  @default(now())
+  email                    String?                   @unique
+  emailVerified            DateTime?
+  image                    String?
+  name                     String?
+  isOnline                 Boolean                   @default(false)
+  lastActiveAt             DateTime?
+  updatedAt                DateTime                  @updatedAt
   conversationParticipants ConversationParticipant[]
-  sentMessages              Message[]
-  messageReactions          MessageReaction[]
-  messageReadReceipts       MessageReadReceipt[] // Track all read receipts for this user
-  // Mentorship relations
-  mentorProfile             MentorProfile?
-  menteeMentorships         Mentorship[]              @relation("MenteeMentorships")
-  writtenReviews            MentorReview[]
+  goals                    Goal[]
+  paths                    LearningPath[]
+  mentorProfile            MentorProfile?
+  writtenReviews           MentorReview[]
+  menteeMentorships        Mentorship[]              @relation("MenteeMentorships")
+  sentMessages             Message[]
+  messageReactions         MessageReaction[]
+  progress                 Progress[]
+  sessions                 Session[]
+  accounts                 Account[]
 
-  @@index([isOnline, lastActiveAt]) // Fast online user queries
+  @@index([isOnline, lastActiveAt])
 }
 
 model Goal {
@@ -51,19 +48,18 @@ model Goal {
 }
 
 model LearningPath {
-  id        String         @id @default(uuid())
-  userId    String
-  prompt    String
-  title     String
-  status    PathStatus     @default(GENERATING)
-  createdAt DateTime       @default(now())
-  goalId    String
-  outline   Json?
-  goal      Goal           @relation(fields: [goalId], references: [id], onDelete: Cascade)
-  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  topics    Topic[]
-  // Chat relation - inverse to Conversation.learningPath
+  id           String        @id @default(uuid())
+  userId       String
+  prompt       String
+  title        String
+  status       PathStatus    @default(GENERATING)
+  createdAt    DateTime      @default(now())
+  goalId       String
+  outline      Json?
   conversation Conversation?
+  goal         Goal          @relation(fields: [goalId], references: [id], onDelete: Cascade)
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  topics       Topic[]
 
   @@index([userId, createdAt])
   @@index([userId, status])
@@ -126,10 +122,10 @@ model Progress {
   videoId             String
   watched             Boolean   @default(false)
   watchedAt           DateTime?
-  farthestPositionSec Int       @default(0)
   watchedSeconds      Int       @default(0)
   lastPositionSec     Int       @default(0)
   updatedAt           DateTime  @updatedAt
+  farthestPositionSec Int       @default(0)
   user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   video               Video     @relation(fields: [videoId], references: [id], onDelete: Cascade)
 
@@ -175,187 +171,155 @@ model VerificationToken {
   @@unique([identifier, token])
 }
 
-// ------------------------------
-// Messaging System (Chat)
-// ------------------------------
 model Conversation {
-  id               String           @id @default(uuid())
-  type             ConversationType
-  name             String?          // For group chats (Discord-style communities)
-  description      String?
-  imageUrl         String?
-  communityKey     String?          @unique // Canonical learning root shared by matched learners
-  learningPathId   String?          @unique // Auto-created for learning path communities (1:1 relation)
-  createdAt        DateTime         @default(now())
-  updatedAt        DateTime         @updatedAt
-  // Group suggestion fields (rule-based + future ML)
-  topicTags        String[]         // Tags like "machine-learning", "web-development" for group categorization
-  memberCount      Int              @default(0) // Denormalized participant count for fast sorting
-  lastActivityAt   DateTime         @updatedAt // Tracks latest group activity for "popular groups" sorting
-  // Relations
-  learningPath     LearningPath?    @relation(fields: [learningPathId], references: [id], onDelete: Cascade)
-  participants     ConversationParticipant[]
-  messages         Message[]
-  lastMessageAt    DateTime?
-  
+  id             String                    @id @default(uuid())
+  type           ConversationType
+  name           String?
+  description    String?
+  imageUrl       String?
+  learningPathId String?                   @unique
+  createdAt      DateTime                  @default(now())
+  updatedAt      DateTime                  @updatedAt
+  lastMessageAt  DateTime?
+  lastActivityAt DateTime                  @updatedAt
+  memberCount    Int                       @default(0)
+  topicTags      String[]
+  communityKey   String?                   @unique
+  learningPath   LearningPath?             @relation(fields: [learningPathId], references: [id], onDelete: Cascade)
+  participants   ConversationParticipant[]
+  messages       Message[]
+
   @@index([learningPathId])
   @@index([type, createdAt])
-  @@index([topicTags]) // Index for fast topic-based group queries
+  @@index([topicTags])
 }
 
 model ConversationParticipant {
-  id               String           @id @default(uuid())
-  conversationId   String
-  userId           String
-  role             ParticipantRole  @default(MEMBER)
-  joinedAt         DateTime         @default(now())
-  lastReadAt       DateTime?
-  // Relations
-  conversation     Conversation     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  user             User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
+  id             String          @id @default(uuid())
+  conversationId String
+  userId         String
+  role           ParticipantRole @default(MEMBER)
+  joinedAt       DateTime        @default(now())
+  lastReadAt     DateTime?
+  conversation   Conversation    @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   @@unique([conversationId, userId])
   @@index([userId])
   @@index([conversationId])
 }
 
 model Message {
-  id               String           @id @default(uuid())
-  conversationId   String
-  senderId         String
-  content          String
-  messageType      MessageType      @default(TEXT)
-  status           MessageStatus    @default(SENT) // WhatsApp-style message status
-  fileUrl          String?          // For attachments
-  fileName         String?
-  fileSize         Int?
-  createdAt        DateTime         @default(now())
-  updatedAt        DateTime         @updatedAt
-  editedAt         DateTime?
-  deletedAt        DateTime?        // Soft delete for messages
-  // Relations
-  conversation     Conversation     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  sender           User             @relation(fields: [senderId], references: [id], onDelete: Cascade)
-  replies          Message[]        @relation("MessageReplies")
-  parentMessageId  String?
-  parentMessage    Message?         @relation("MessageReplies", fields: [parentMessageId], references: [id])
-  reactions        MessageReaction[]
-  // Track message read receipts across participants
-  readReceipts     MessageReadReceipt[]
-  
+  id              String            @id @default(uuid())
+  conversationId  String
+  senderId        String
+  content         String
+  messageType     MessageType       @default(TEXT)
+  fileUrl         String?
+  fileName        String?
+  fileSize        Int?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  editedAt        DateTime?
+  deletedAt       DateTime?
+  parentMessageId String?
+  status          MessageStatus     @default(SENT)
+  conversation    Conversation      @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  parentMessage   Message?          @relation("MessageReplies", fields: [parentMessageId], references: [id])
+  replies         Message[]         @relation("MessageReplies")
+  sender          User              @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  reactions       MessageReaction[]
+
   @@index([conversationId, createdAt])
   @@index([senderId, createdAt])
   @@index([parentMessageId])
-  @@index([status]) // Fast query for unread messages
+  @@index([status])
 }
 
 model MessageReaction {
-  id               String           @id @default(uuid())
-  messageId        String
-  userId           String
-  emoji            String
-  createdAt        DateTime         @default(now())
-  // Relations
-  message          Message          @relation(fields: [messageId], references: [id], onDelete: Cascade)
-  user             User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
+  id        String   @id @default(uuid())
+  messageId String
+  userId    String
+  emoji     String
+  createdAt DateTime @default(now())
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   @@unique([messageId, userId, emoji])
 }
 
-// Track individual read receipts for group chats (who has seen which message)
-model MessageReadReceipt {
-  id               String           @id @default(uuid())
-  messageId        String
-  userId           String
-  readAt           DateTime         @default(now())
-  // Relations
-  message          Message          @relation(fields: [messageId], references: [id], onDelete: Cascade)
-  user             User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  @@unique([messageId, userId])
-  @@index([messageId, readAt])
-}
-
-// ------------------------------
-// Mentorship System
-// ------------------------------
 model MentorProfile {
-  id               String           @id @default(uuid())
-  userId           String           @unique
+  id               String         @id @default(uuid())
+  userId           String         @unique
   bio              String?
-  expertise        String[]         // Areas of expertise
-  hourlyRate       Decimal?         @db.Decimal(10, 2)
-  availability     Boolean          @default(true)
-  totalMenteeCount Int              @default(0)
-  averageRating    Decimal?         @db.Decimal(3, 2)
-  createdAt        DateTime         @default(now())
-  updatedAt        DateTime         @updatedAt
-  // Relations
-  user             User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  mentorships      Mentorship[]     @relation("MentorMentorships")
+  expertise        String[]
+  hourlyRate       Decimal?       @db.Decimal(10, 2)
+  availability     Boolean        @default(true)
+  totalMenteeCount Int            @default(0)
+  averageRating    Decimal?       @db.Decimal(3, 2)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  user             User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   reviews          MentorReview[]
-  
+  mentorships      Mentorship[]   @relation("MentorMentorships")
+
   @@index([userId])
   @@index([expertise])
   @@index([availability])
 }
 
 model Mentorship {
-  id               String           @id @default(uuid())
-  mentorId         String
-  menteeId         String
-  status           MentorshipStatus @default(PENDING)
-  startDate        DateTime?
-  endDate          DateTime?
-  createdAt        DateTime         @default(now())
-  updatedAt        DateTime         @updatedAt
-  // Relations
-  mentor           MentorProfile    @relation("MentorMentorships", fields: [mentorId], references: [id], onDelete: Cascade)
-  mentee           User             @relation("MenteeMentorships", fields: [menteeId], references: [id], onDelete: Cascade)
-  sessions          MentorshipSession[]
-  reviews          MentorReview[]
-  
+  id        String              @id @default(uuid())
+  mentorId  String
+  menteeId  String
+  status    MentorshipStatus    @default(PENDING)
+  startDate DateTime?
+  endDate   DateTime?
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
+  reviews   MentorReview[]
+  mentee    User                @relation("MenteeMentorships", fields: [menteeId], references: [id], onDelete: Cascade)
+  mentor    MentorProfile       @relation("MentorMentorships", fields: [mentorId], references: [id], onDelete: Cascade)
+  sessions  MentorshipSession[]
+
   @@unique([mentorId, menteeId])
   @@index([mentorId, status])
   @@index([menteeId, status])
 }
 
 model MentorshipSession {
-  id               String           @id @default(uuid())
-  mentorshipId     String
-  title            String
-  description      String?
-  startTime        DateTime
-  endTime           DateTime
-  meetingLink       String?
-  notes            String?
-  status           SessionStatus    @default(SCHEDULED)
-  createdAt        DateTime         @default(now())
-  updatedAt        DateTime         @updatedAt
-  // Relations
-  mentorship       Mentorship       @relation(fields: [mentorshipId], references: [id], onDelete: Cascade)
-  
+  id           String        @id @default(uuid())
+  mentorshipId String
+  title        String
+  description  String?
+  startTime    DateTime
+  endTime      DateTime
+  meetingLink  String?
+  notes        String?
+  status       SessionStatus @default(SCHEDULED)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  mentorship   Mentorship    @relation(fields: [mentorshipId], references: [id], onDelete: Cascade)
+
   @@index([mentorshipId, startTime])
   @@index([startTime])
 }
 
 model MentorReview {
-  id               String           @id @default(uuid())
-  mentorshipId     String
-  reviewerId       String
-  mentorProfileId  String?          // Added to fix inverse relation with MentorProfile
-  rating           Int              // 1-5 scale
-  comment          String?
-  createdAt        DateTime         @default(now())
-  // Relations
-  mentorship       Mentorship       @relation(fields: [mentorshipId], references: [id], onDelete: Cascade)
-  reviewer         User             @relation(fields: [reviewerId], references: [id], onDelete: Cascade)
-  mentorProfile    MentorProfile?   @relation(fields: [mentorProfileId], references: [id], onDelete: Cascade)
-  
+  id              String         @id @default(uuid())
+  mentorshipId    String
+  reviewerId      String
+  mentorProfileId String?
+  rating          Int
+  comment         String?
+  createdAt       DateTime       @default(now())
+  mentorProfile   MentorProfile? @relation(fields: [mentorProfileId], references: [id], onDelete: Cascade)
+  mentorship      Mentorship     @relation(fields: [mentorshipId], references: [id], onDelete: Cascade)
+  reviewer        User           @relation(fields: [reviewerId], references: [id], onDelete: Cascade)
+
   @@unique([mentorshipId, reviewerId])
 }
 
-// Enums
 enum GoalStatus {
   ACTIVE
   COMPLETED
@@ -374,8 +338,8 @@ enum VideoSource {
 }
 
 enum ConversationType {
-  DIRECT    // 1:1 chat (WhatsApp style)
-  GROUP     // Community group (Discord style - auto-created for learning paths)
+  DIRECT
+  GROUP
 }
 
 enum ParticipantRole {
@@ -388,14 +352,13 @@ enum MessageType {
   TEXT
   IMAGE
   FILE
-  SYSTEM    // System messages like "user joined"
+  SYSTEM
 }
 
-// WhatsApp-style message statuses (blue ticks)
 enum MessageStatus {
-  SENT      // Message sent to server (single grey tick)
-  DELIVERED // Message delivered to recipient's device (double grey ticks)
-  SEEN      // Message read by recipient (double blue ticks)
+  SENT
+  DELIVERED
+  SEEN
 }
 
 enum MentorshipStatus {
