@@ -1,0 +1,119 @@
+From a94639748a1e6b546fa99514032fdacaf82f4db6 Mon Sep 17 00:00:00 2001
+From: Jay <josephlyimo201@gmail.com>
+Date: Mon, 19 Oct 2026 10:49:23 +0000
+Subject: [PATCH 1/2] fix: use the shared Prisma client in chat and mentor
+ routes
+
+Six API routes each created their own PrismaClient at module load. On
+serverless hosting every instance then opens its own connection pool, which
+can exhaust the Neon connection limit under real traffic. They now import the
+shared singleton from infrastructure/db/prisma, like the rest of the app.
+---
+ app/api/conversations/create-direct/route.ts | 4 +---
+ app/api/conversations/route.ts               | 4 +---
+ app/api/mentors/route.ts                     | 4 +---
+ app/api/mentorships/route.ts                 | 4 +---
+ app/api/messages/route.ts                    | 4 +---
+ app/api/users/route.ts                       | 4 +---
+ 6 files changed, 6 insertions(+), 18 deletions(-)
+
+diff --git a/app/api/conversations/create-direct/route.ts b/app/api/conversations/create-direct/route.ts
+index 8d3a376..3f575ac 100644
+--- a/app/api/conversations/create-direct/route.ts
++++ b/app/api/conversations/create-direct/route.ts
+@@ -1,10 +1,8 @@
+ import { authOptions } from '@/infrastructure/auth/auth';
+-import { PrismaClient } from '@prisma/client';
++import { prisma } from '@/infrastructure/db/prisma';
+ import { getServerSession } from 'next-auth/next';
+ import { NextResponse } from 'next/server';
+ 
+-const prisma = new PrismaClient();
+-
+ export async function POST(request: Request) {
+   try {
+     // Verify authenticated user
+diff --git a/app/api/conversations/route.ts b/app/api/conversations/route.ts
+index 292824b..7d848ae 100644
+--- a/app/api/conversations/route.ts
++++ b/app/api/conversations/route.ts
+@@ -1,10 +1,8 @@
+ import { authOptions } from '@/infrastructure/auth/auth';
+-import { PrismaClient } from '@prisma/client';
++import { prisma } from '@/infrastructure/db/prisma';
+ import { getServerSession } from 'next-auth/next';
+ import { NextResponse } from 'next/server';
+ 
+-const prisma = new PrismaClient();
+-
+ // helper function 
+ function toTag(str: string): string {
+   return str.toLowerCase()
+diff --git a/app/api/mentors/route.ts b/app/api/mentors/route.ts
+index 3a3a164..d68cd4c 100644
+--- a/app/api/mentors/route.ts
++++ b/app/api/mentors/route.ts
+@@ -1,11 +1,9 @@
+ import { authOptions } from '@/infrastructure/auth/auth';
++import { prisma } from '@/infrastructure/db/prisma';
+ import type { Prisma } from '@prisma/client';
+-import { PrismaClient } from '@prisma/client';
+ import { getServerSession } from 'next-auth/next';
+ import { NextResponse } from 'next/server';
+ 
+-const prisma = new PrismaClient();
+-
+ export async function GET(request: Request) {
+   try {
+     const { searchParams } = new URL(request.url);
+diff --git a/app/api/mentorships/route.ts b/app/api/mentorships/route.ts
+index f8e1991..319d88e 100644
+--- a/app/api/mentorships/route.ts
++++ b/app/api/mentorships/route.ts
+@@ -1,10 +1,8 @@
+ import { authOptions } from '@/infrastructure/auth/auth';
+-import { PrismaClient } from '@prisma/client';
++import { prisma } from '@/infrastructure/db/prisma';
+ import { getServerSession } from 'next-auth/next';
+ import { NextResponse } from 'next/server';
+ 
+-const prisma = new PrismaClient();
+-
+ export async function GET(request: Request) {
+   try {
+     const session = await getServerSession(authOptions);
+diff --git a/app/api/messages/route.ts b/app/api/messages/route.ts
+index 9698044..30fed6b 100644
+--- a/app/api/messages/route.ts
++++ b/app/api/messages/route.ts
+@@ -1,10 +1,8 @@
+ import { authOptions } from '@/infrastructure/auth/auth';
+-import { PrismaClient } from '@prisma/client';
++import { prisma } from '@/infrastructure/db/prisma';
+ import { getServerSession } from 'next-auth/next';
+ import { NextResponse } from 'next/server';
+ 
+-const prisma = new PrismaClient();
+-
+ export async function GET(request: Request) {
+   try {
+     const { searchParams } = new URL(request.url);
+diff --git a/app/api/users/route.ts b/app/api/users/route.ts
+index 62d5fc3..4ab4e1a 100644
+--- a/app/api/users/route.ts
++++ b/app/api/users/route.ts
+@@ -1,10 +1,8 @@
+ import { authOptions } from '@/infrastructure/auth/auth';
+-import { PrismaClient } from '@prisma/client';
++import { prisma } from '@/infrastructure/db/prisma';
+ import { getServerSession } from 'next-auth/next';
+ import { NextResponse } from 'next/server';
+ 
+-const prisma = new PrismaClient();
+-
+ export async function GET() {
+   try {
+     const session = await getServerSession(authOptions);
+-- 
+2.43.0
+
