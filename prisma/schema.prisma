@@ -84,6 +84,13 @@ model Topic {
   @@index([selectedVideoId])
 }
 
+model YouTubeTopicCache {
+  topicKey String   @id
+  topic    String
+  videos   Json
+  cachedAt DateTime @default(now())
+}
+
 model Video {
   id             String       @id @default(uuid())
   youtubeVideoId String       @unique

@@ -7,6 +7,18 @@ import { NextRequest, NextResponse } from "next/server";
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const userId = await getOrCreateUserId();
+
+  // A Vercel function can be stopped at maxDuration without running the
+  // processor's catch handler. Convert an abandoned generation into a visible
+  // failure on the next poll instead of leaving the route in a loading state.
+  if (process.env.VERCEL === "1") {
+    const staleBefore = new Date(Date.now() - 90 * 1000);
+    await prisma.learningPath.updateMany({
+      where: { id, userId, status: "GENERATING", createdAt: { lt: staleBefore } },
+      data: { status: "FAILED" },
+    });
+  }
+
   const path = await getPath(id, userId);
 
   if (!path) {

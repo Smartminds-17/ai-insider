@@ -1,4 +1,5 @@
 import type { CandidateVideo } from "@/domain/types";
+import { prisma } from "@/infrastructure/db/prisma";
 
 const YOUTUBE_API_BASE = "https://www.googleapis.com/youtube/v3";
 
@@ -6,6 +7,7 @@ const YOUTUBE_API_BASE = "https://www.googleapis.com/youtube/v3";
 // Cached for 1 hour to reduce API calls
 const searchCache = new Map<string, { data: CandidateVideo[]; timestamp: number }>();
 const CACHE_TTL = 60 * 60 * 1000; // 1 hour
+const PERSISTENT_CACHE_TTL = 14 * 24 * 60 * 60 * 1000; // 14 days
 
 // Parses ISO 8601 durations like "PT14M32S" into seconds.
 function parseIsoDuration(iso: string): number {
@@ -48,11 +50,7 @@ async function fetchWithRetry(url: string, retries = 5, baseDelay = 2000): Promi
   }
 }
 
-// ==========================================
-// SIMPLIFIED SEQUENTIAL RATE LIMITER for YouTube FREE TIER
-// Since free tier only allows ~1 search every 15 minutes, we just run ONE request at a time
-// No complex token bucket - prevents all concurrency issues by queuing everything
-// ==========================================
+// Serialize calls inside this process to avoid unnecessary concurrent quota use.
 type QueuedRequest = {
   resolve: () => void;
   reject: (error: Error) => void;
@@ -63,11 +61,10 @@ class YouTubeRateLimiter {
   private isProcessing = false;
   private queue: QueuedRequest[] = [];
   private lastRequestTime = 0;
-  private readonly MIN_DELAY_BETWEEN_REQUESTS = 1000; // 1 second between requests (way under YouTube's 10,000/day free tier limit)
-  // Actual YouTube free tier: 10,000 requests/day = ~0.11 requests/second, so 1 request/second is extremely safe
+  private readonly MIN_DELAY_BETWEEN_REQUESTS = 1000;
 
   constructor() {
-    console.log("YouTube rate limiter initialized - 1 request per second max (well under free tier limits)");
+    console.log("YouTube request concurrency limiter initialized (one call at a time, one-second spacing)");
   }
 
   // Process the queue one at a time, never run concurrent requests
@@ -122,30 +119,8 @@ class YouTubeRateLimiter {
   }
 }
 
-// Singleton instance - runs ONLY ONE YouTube search at a time, 1 second apart (well under free tier)
+// Singleton instance; this limit is process-local, not shared across deployments.
 const youtubeRateLimiter = new YouTubeRateLimiter();
-
-// Graceful fallback placeholder videos for when API hits rate limits
-// These are clearly marked as placeholders in the UI so users know what's happening
-const PLACEHOLDER_VIDEO_IDS = [
-  "dQw4w9WgXcQ", // Classic test video (always works)
-  "jNQXAC9IVRw", // First YouTube video (always available)
-];
-
-// Create placeholder videos that clearly indicate they're temporary due to rate limits
-function placeholderVideos(topic: string): CandidateVideo[] {
-  return Array.from({ length: 5 }).map((_, i) => ({
-    youtubeVideoId: PLACEHOLDER_VIDEO_IDS[i % PLACEHOLDER_VIDEO_IDS.length],
-    title: `[PLACEHOLDER - Rate Limit Hit] ${topic} — Real videos will load when quota resets`,
-    channelTitle: "Placeholder (API Quota Exceeded)",
-    thumbnailUrl: `https://i.ytimg.com/vi/${PLACEHOLDER_VIDEO_IDS[0]}/mqdefault.jpg`,
-    durationSec: 1800,
-    viewCount: 0,
-    publishedAt: new Date().toISOString(),
-  }));
-}
-
-// No fallback mock videos - if API fails, user gets clear error instead of unrelated videos
 
 // Exponential backoff for retries
 function delay(ms: number): Promise<void> {
@@ -177,50 +152,49 @@ export async function searchVideosForTopic(
   maxResults = 12
 ): Promise<CandidateVideo[]> {
   // Check cache first to avoid redundant API calls
-  const cacheKey = `${topic}:${maxResults}`;
+  const normalizedTopic = topic.trim().toLocaleLowerCase();
+  const cacheKey = `${normalizedTopic}:${maxResults}`;
   const cached = searchCache.get(cacheKey);
   if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
     return cached.data;
   }
 
+  const persistentCache = await prisma.youTubeTopicCache.findUnique({
+    where: { topicKey: cacheKey },
+  });
+  if (persistentCache && Date.now() - persistentCache.cachedAt.getTime() < PERSISTENT_CACHE_TTL) {
+    const videos = persistentCache.videos as unknown as CandidateVideo[];
+    searchCache.set(cacheKey, { data: videos, timestamp: Date.now() });
+    return videos;
+  }
+
   const apiKey = process.env.YOUTUBE_API_KEY;
     if (!apiKey) {
-      console.warn("YouTube API key not found, using placeholders for:", topic);
-      const placeholders = placeholderVideos(topic);
-      searchCache.set(cacheKey, { data: placeholders, timestamp: Date.now() });
-      return placeholders;
+      throw new Error("YouTube sourcing is unavailable: YOUTUBE_API_KEY is not configured.");
     }
 
-    // search.list costs 100 units, videos.list (details) costs 1 unit — 101 total.
-    // Block here until the global sequential limiter has room, so we throttle proactively
+    // YouTube search and details calls consume provider quota. This limiter only
+    // serializes requests within this process; it is not a daily quota guard.
     try {
       // Wait for rate limiter with timeout
       await youtubeRateLimiter.acquire();
       
       const searchUrl = new URL(`${YOUTUBE_API_BASE}/search`);
       searchUrl.searchParams.set("part", "snippet");
-      searchUrl.searchParams.set("q", `${topic} full tutorial complete course`);
+      searchUrl.searchParams.set("q", `${topic} tutorial`);
       searchUrl.searchParams.set("type", "video");
-      searchUrl.searchParams.set("videoDuration", "long");
       searchUrl.searchParams.set("maxResults", String(maxResults));
       searchUrl.searchParams.set("relevanceLanguage", "en");
       searchUrl.searchParams.set("key", apiKey);
 
       const searchRes = await fetchWithRetry(searchUrl.toString());
       
-      // If we hit rate limits, use clear placeholders
       if (searchRes.status === 429) {
-        console.warn("YouTube API rate limit hit, using placeholders for:", topic);
-        const placeholders = placeholderVideos(topic);
-        searchCache.set(cacheKey, { data: placeholders, timestamp: Date.now() });
-        return placeholders;
+        throw new Error("YouTube API rate limit reached while sourcing learning videos.");
       }
 
       if (!searchRes.ok) {
-        console.warn(`YouTube search failed (status ${searchRes.status}), using placeholders for:`, topic);
-        const placeholders = placeholderVideos(topic);
-        searchCache.set(cacheKey, { data: placeholders, timestamp: Date.now() });
-        return placeholders;
+        throw new Error(`YouTube search failed with status ${searchRes.status}.`);
       }
 
       const searchData = await searchRes.json();
@@ -229,10 +203,7 @@ export async function searchVideosForTopic(
         .filter(Boolean);
 
       if (videoIds.length === 0) {
-        console.warn("No YouTube videos found, using placeholders for:", topic);
-        const placeholders = placeholderVideos(topic);
-        searchCache.set(cacheKey, { data: placeholders, timestamp: Date.now() });
-        return placeholders;
+        throw new Error(`No YouTube videos found for topic: ${topic}`);
       }
 
       // Wait 1s between search and details call to avoid overwhelming the API
@@ -248,17 +219,11 @@ export async function searchVideosForTopic(
       const detailsRes = await fetchWithRetry(detailsUrl.toString());
       
       if (detailsRes.status === 429) {
-        console.warn("YouTube API rate limit hit on details call, using placeholders for:", topic);
-        const placeholders = placeholderVideos(topic);
-        searchCache.set(cacheKey, { data: placeholders, timestamp: Date.now() });
-        return placeholders;
+        throw new Error("YouTube API quota was reached while loading video details.");
       }
 
       if (!detailsRes.ok) {
-        console.warn(`YouTube details failed (status ${detailsRes.status}), using placeholders for:`, topic);
-        const placeholders = placeholderVideos(topic);
-        searchCache.set(cacheKey, { data: placeholders, timestamp: Date.now() });
-        return placeholders;
+        throw new Error(`YouTube video details failed with status ${detailsRes.status}.`);
       }
 
       const detailsData = await detailsRes.json();
@@ -286,13 +251,16 @@ export async function searchVideosForTopic(
 
       // Cache the successful results
       searchCache.set(cacheKey, { data: results, timestamp: Date.now() });
+      await prisma.youTubeTopicCache.upsert({
+        where: { topicKey: cacheKey },
+        update: { topic, videos: JSON.parse(JSON.stringify(results)), cachedAt: new Date() },
+        create: { topicKey: cacheKey, topic, videos: JSON.parse(JSON.stringify(results)) },
+      });
       console.log(`Successfully fetched ${results.length} real videos for topic: ${topic}`);
       return results;
 
     } catch (err) {
-      console.warn("YouTube API error, using placeholders for:", topic, err);
-      const placeholders = placeholderVideos(topic);
-      searchCache.set(cacheKey, { data: placeholders, timestamp: Date.now() });
-      return placeholders;
+      console.warn("YouTube sourcing failed for topic:", topic, err);
+      throw err;
     }
 }

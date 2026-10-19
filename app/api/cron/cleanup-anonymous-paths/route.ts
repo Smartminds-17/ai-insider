@@ -1,4 +1,5 @@
 import { prisma } from "@/infrastructure/db/prisma";
+import { ANONYMOUS_IDENTITY_TTL_SECONDS } from "@/infrastructure/auth/getOrCreateUserId";
 import { NextRequest, NextResponse } from "next/server";
 import { timingSafeEqual } from "node:crypto";
 
@@ -9,7 +10,7 @@ function isInternalRequest(req: NextRequest, secret: string) {
   return received.length === expected.length && timingSafeEqual(received, expected);
 }
 
-// Cleanup job: Delete all anonymous user paths older than 24 hours
+// Cleanup job: Delete anonymous users and paths after their 30-day identity expires.
 // Callable via Supabase Cron: POST /api/cron/cleanup-anonymous-paths?secret=YOUR_INTERNAL_API_SECRET
 export async function POST(req: NextRequest) {
   // Verify internal request
@@ -30,12 +31,12 @@ export async function POST(req: NextRequest) {
     });
     const anonymousUserIds = anonymousUsers.map(u => u.id);
 
-    // 2. Delete all their paths older than 24 hours
-    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    // 2. Delete paths older than the anonymous identity lifetime.
+    const identityExpiry = new Date(Date.now() - ANONYMOUS_IDENTITY_TTL_SECONDS * 1000);
     const deletedPaths = await prisma.learningPath.deleteMany({
       where: {
         userId: { in: anonymousUserIds },
-        createdAt: { lt: twentyFourHoursAgo },
+        createdAt: { lt: identityExpiry },
       },
     });
 
@@ -43,7 +44,7 @@ export async function POST(req: NextRequest) {
     const deletedUsers = await prisma.user.deleteMany({
       where: {
         id: { in: anonymousUserIds },
-        createdAt: { lt: twentyFourHoursAgo },
+        createdAt: { lt: identityExpiry },
       },
     });
 

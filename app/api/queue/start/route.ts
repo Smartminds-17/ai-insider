@@ -33,8 +33,13 @@ export async function GET(req: NextRequest) {
       activeWorkers: 1,
       concurrency: 2
     });
+  } else if (process.env.VERCEL === "1") {
+    return NextResponse.json({
+      status: "Vercel post-response processing enabled",
+      note: "Path generation runs through Next.js after() and is bounded by the route maxDuration.",
+    });
   } else {
-    // In local development mode with in-memory queue
+    // In local development mode without a native Redis worker
     return NextResponse.json({ 
       status: "In-memory concurrency control active (local development)",
       activeWorkers: 0,

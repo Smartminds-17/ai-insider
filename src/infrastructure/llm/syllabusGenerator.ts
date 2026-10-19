@@ -108,11 +108,12 @@ export async function generateSyllabus(prompt: string): Promise<Syllabus> {
     return cached.data;
   }
 
-  // Set USE_REAL_GEMINI_API=true in .env to enable real AI syllabi in development
+  // Mock syllabi are available only when explicitly enabled for local development.
   const useRealAPI = process.env.USE_REAL_GEMINI_API === "true";
+  const useMockData = process.env.USE_MOCK_DATA === "true" && process.env.NODE_ENV !== "production";
   
-  // Return mock data unless we explicitly enable real API calls
-  if (!genAI || !useRealAPI) {
+  // Return mock data only when explicitly enabled for local development.
+  if (useMockData) {
     const mockSyllabus = {
       title: `Learning path: ${prompt.slice(0, 60)}`,
       topics: [
@@ -125,11 +126,12 @@ export async function generateSyllabus(prompt: string): Promise<Syllabus> {
     };
     // Cache mock syllabi too
     syllabusCache.set(cacheKey, { data: mockSyllabus, timestamp: Date.now() });
-    if (!useRealAPI && genAI) {
-      console.log("ℹ️ To use real Gemini API, add USE_REAL_GEMINI_API=true to your .env");
-    }
     console.log("🧪 Returning mock syllabus (real API calls disabled)");
     return mockSyllabus;
+  }
+
+  if (!genAI || !useRealAPI) {
+    throw new Error("Syllabus generation is unavailable. Configure GEMINI_API_KEY and USE_REAL_GEMINI_API=true, or explicitly enable local mock data.");
   }
 
   const model = genAI.getGenerativeModel({
@@ -169,20 +171,8 @@ export async function generateSyllabus(prompt: string): Promise<Syllabus> {
         await new Promise(resolve => setTimeout(resolve, delay));
       } else if (attempt >= maxRetries) {
         // We've exhausted all retries - throw a more user-friendly error
-        console.error(`Gemini API failed after ${maxRetries} attempts. Falling back to mock data.`);
-        // Return mock data instead of crashing the entire request!
-        const mockSyllabus = {
-          title: `Learning path: ${prompt.slice(0, 60)}`,
-          topics: [
-            { title: "Fundamentals", order: 0 },
-            { title: "Core concepts", order: 1 },
-            { title: "Hands-on practice", order: 2 },
-            { title: "Intermediate techniques", order: 3 },
-            { title: "Real-world application", order: 4 },
-          ],
-        };
-        syllabusCache.set(cacheKey, { data: mockSyllabus, timestamp: Date.now() });
-        return mockSyllabus;
+        console.error(`Gemini API failed after ${maxRetries} attempts.`);
+        throw error;
       } else {
         // Non-retryable error - re-throw
         throw error;

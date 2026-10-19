@@ -2,6 +2,7 @@ import { createLearningPath, processLearningPathTopics } from "@/application/gen
 import type { Syllabus } from "@/domain/types";
 import { prisma } from "@/infrastructure/db/prisma";
 import { Queue, Worker } from "bullmq";
+import { after } from "next/server";
 
 // BullMQ requires a native Redis connection. Upstash REST credentials are only
 // suitable for HTTP clients such as @upstash/redis, not for a queue worker.
@@ -50,21 +51,16 @@ const getRedisConnection = () => {
 
 const redisConnection = getRedisConnection();
 
-// We only keep userJobTimestamps for rate limit tracking (used by debug clear endpoint)
-const userJobTimestamps = new Map<string, number[]>();
-
-// We no longer use the in-memory queue processing logic since we create
-// paths immediately and process them right away - this simplifies the codebase
-// and eliminates the old queueing overhead that was causing delays
-
 // Initialize queue only if we have a valid Redis connection
 let pathGenerationQueue: Queue | null = null;
 let pathGenerationWorker: Worker | null = null;
 
-// Export them for use in API routes
-export { pathGenerationQueue, pathGenerationWorker, userJobTimestamps };
+export { pathGenerationQueue, pathGenerationWorker };
 
-if (redisConnection) {
+// Vercel functions are short-lived and must not host a BullMQ worker. On
+// Vercel, work is registered with Next.js after() below; persistent hosts run
+// the BullMQ worker in their long-lived Node process.
+if (redisConnection && process.env.VERCEL !== "1") {
   // Create BullMQ queue for production (uses Upstash Redis)
   pathGenerationQueue = new Queue("path-generation", { connection: redisConnection });
   
@@ -105,6 +101,10 @@ if (redisConnection) {
 
 // Helper function to add a new path generation job (uses either BullMQ or in-memory queue)
 export async function queuePathGeneration(userId: string, prompt: string): Promise<{ jobId: string }> {
+  if (process.env.NODE_ENV === "production" && !pathGenerationQueue && process.env.VERCEL !== "1") {
+    throw new Error("Path generation is unavailable: configure REDIS_URL for the production worker.");
+  }
+
   // Reject before creating the path and goal, so throttled attempts leave no rows behind.
   if (pathGenerationQueue) {
     const userJobs = await pathGenerationQueue.getJobs(["active", "waiting"]);
@@ -116,9 +116,13 @@ export async function queuePathGeneration(userId: string, prompt: string): Promi
   // writes, so the frontend gets a real database ID right away.
   const { pathId, syllabus } = await createLearningPath(userId, prompt);
 
-  // Case 1: Try to use BullMQ queue if available, but fall back to local if it fails
-  let queueAddFailed = false;
-  if (pathGenerationQueue) {
+  // Vercel does not host durable BullMQ workers. Use the platform-supported
+  // post-response lifetime hook so processing remains attached to the request.
+  if (process.env.VERCEL === "1") {
+    after(async () => {
+      await processLearningPathTopics(pathId, syllabus);
+    });
+  } else if (pathGenerationQueue) {
     try {
       // Add job to BullMQ queue to process in background. Pass the syllabus we
       // already generated so the worker doesn't call Gemini a second time.
@@ -136,13 +140,11 @@ export async function queuePathGeneration(userId: string, prompt: string): Promi
         }
       );
     } catch (queueErr) {
-      console.warn("⚠️ Failed to add job to BullMQ queue, falling back to local processing:", queueErr);
-      queueAddFailed = true;
+      await prisma.learningPath.update({ where: { id: pathId }, data: { status: "FAILED" } });
+      throw new Error("Path generation could not be queued.", { cause: queueErr });
     }
-  }
-
-  // Case 2: Local processing if queue doesn't exist OR queue add failed
-  if (!pathGenerationQueue || queueAddFailed) {
+  } else {
+    // Development only; production is required to use a persistent worker.
     void processLearningPathTopics(pathId, syllabus).catch((error) => {
       console.error("Local path generation failed:", error);
     });
@@ -175,9 +177,11 @@ export async function restartStuckPath(pathId: string, userId: string): Promise<
     data: { status: "GENERATING" }
   });
 
-  // Use the same queue logic as new path generation - with fallback if queue fails
-  let queueAddFailed = false;
-  if (pathGenerationQueue) {
+  if (process.env.VERCEL === "1") {
+    after(async () => {
+      await processLearningPathTopics(pathId, syllabus);
+    });
+  } else if (pathGenerationQueue) {
     try {
       await pathGenerationQueue.add(
         "generate-path",
@@ -190,13 +194,10 @@ export async function restartStuckPath(pathId: string, userId: string): Promise<
         }
       );
     } catch (queueErr) {
-      console.warn("⚠️ Failed to add job to BullMQ queue, falling back to local processing:", queueErr);
-      queueAddFailed = true;
+      await prisma.learningPath.update({ where: { id: pathId }, data: { status: "FAILED" } });
+      throw new Error("Path generation could not be queued.", { cause: queueErr });
     }
-  }
-
-  // Fallback to local processing if queue doesn't exist OR queue add failed
-  if (!pathGenerationQueue || queueAddFailed) {
+  } else {
     void processLearningPathTopics(pathId, syllabus).catch((error) => {
       console.error("Local path re-generation failed:", error);
     });
@@ -217,7 +218,7 @@ if (process.env.NODE_ENV === "development") {
       if (stuckPaths.length > 0) {
         console.log(`🔄 Found ${stuckPaths.length} stuck generating paths, attempting to restart...`);
         for (const path of stuckPaths) {
-          // Only restart paths created in the last 24h to avoid old stale paths
+          // Only restart recent paths to avoid repeatedly reviving old failures.
           const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
           if (path.createdAt > dayAgo) {
             console.log(`Restarting path: ${path.id} (local mode: ${!pathGenerationQueue})`);

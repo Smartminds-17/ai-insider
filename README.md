@@ -52,11 +52,16 @@ touches one file each.
    npx prisma migrate dev --name init
    ```
 
-4. **Add API keys (optional but recommended)** in `.env`:
-   - `GEMINI_API_KEY` plus `USE_REAL_GEMINI_API=true` — without them, syllabus generation falls back to a
-     generic 5-topic outline so you can still test the rest of the app.
-   - `YOUTUBE_API_KEY` — without it, video search falls back to mock results
-     so you can still test the UI/progress flow without burning API quota.
+4. **Configure integrations** in `.env`:
+   - Set `GEMINI_API_KEY` and `USE_REAL_GEMINI_API=true` for tailored syllabi.
+   - Set `YOUTUBE_API_KEY` for real video sourcing. Missing keys and provider
+     failures now fail generation visibly rather than saving generic topics or
+     placeholder videos.
+   - Set `USE_MOCK_DATA=true` only for local UI work. Mock syllabi are disabled
+     in production.
+   - Production path creation also requires Upstash REST credentials for shared
+     rate limits. A persistent Node deployment additionally needs native
+     `REDIS_URL` for BullMQ; Vercel uses the bounded `after()` continuation.
 
 5. **Run it**
    ```bash
@@ -69,7 +74,7 @@ touches one file each.
    npm run build
    npm start
    ```
-   The project is CI-ready with `npm run lint` exiting with 0 errors for automated deployments.
+   Run the repository lint, type-check, and build gates before deploying.
 
 ## Deliberately not available yet
 
@@ -108,7 +113,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - **Stale state warnings**: Added cancellation flags to prevent stale fetches from overwriting component state
-- **CI pipeline readiness**: `npm run lint` now exits successfully with 0 errors, enabling automated CI/CD workflows
+- **CI pipeline gates**: The workflow runs lint, type-check, and build checks; the current checkout still has lint errors to resolve before that gate passes.
 
 ## [0.1.0] - 2026-09-05
 ### Added
@@ -122,33 +127,19 @@ All notable changes to this project will be documented in this file.
 - **Single video playback**: Only one video plays at a time across the entire page to prevent audio overlap
 
 ---
-## Previous production fixes (2024)
+## Operational notes
 
-We've implemented critical fixes to resolve concurrency, rate-limit, and performance issues that were causing mock data fallback, 404s, and slow auth:
-
-### 1. YouTube API Concurrency & Rate Limiting (Fixed)
-- **Problem**: Multiple concurrent YouTube API requests were hitting free-tier limits, causing constant `Rate limiter timeout (4000ms)` errors and mock data fallback.
-- **Solution**: Replaced complex token-bucket logic with a **sequential rate limiter** (`src/infrastructure/youtube/youtubeClient.ts`) that strictly enforces **1 request every 16 minutes** (matches YouTube free tier's strict quota of ~100 requests/day).
-- **Important Free Tier Note**: YouTube's free tier allows ~100 searches/day total. For a syllabus with 5 topics, this means total processing time is ~80 minutes. If you're developing locally, use mock data by omitting `YOUTUBE_API_KEY` from `.env` to avoid real API calls.
-- **Details**:
-  - 25-minute timeout (up from 4s) to eliminate false timeouts
-  - In-memory queue processes only one request at a time
-  - Console logs display exact wait time: `YouTube quota: waiting 14 minutes for next search...`
-  - Never sends concurrent requests - completely eliminates 429 rate limit errors
-  - Updated topic processing to be sequential in `generatePath.ts` to avoid queue pileups
-
-### 2. Auth Callback Speed Fix (3.7s → <200ms)
-- **Problem**: Anonymous user migration was running synchronously in the auth callback, causing 5.8s response times.
-- **Solution**: Moved migration logic to a fire-and-forget async call (`src/infrastructure/auth/auth.ts`) so auth callbacks respond immediately.
-
-### 3. Path Generation 404 Errors (Fixed)
-- **Problem**: Queue was returning fake `local-${Date.now()}` job IDs instead of real path IDs, causing 404s when accessing `/api/paths/[id]`.
-- **Solution**: Rewrote `queuePathGeneration()` to return actual database path IDs (`src/infrastructure/queues/pathGeneration.queue.ts`).
-- **Bonus**: Removed 50+ lines of unused dead code (in-memory queue variables that were never used).
-
-### 4. Gemini API Rate Limiter Fix
-- **Problem**: Original config had 19 requests/day limit, causing 76-minute waits between requests.
-- **Solution**: Updated Gemini rate limiter to 15 requests/minute (`src/infrastructure/llm/syllabusGenerator.ts`) to align with Anthropic's free tier limits.
+- YouTube search and detail calls consume provider quota. Topic results are
+  cached in Postgres for 14 days and in memory for one hour per process, so
+  repeat topics avoid another provider search across deployments.
+- Video ranking balances popularity, duration fit, and recency. It does not
+  verify topic relevance with transcripts or an LLM.
+- Anonymous identity, visible paths, and cleanup retention share a 45-day
+  lifetime. Monthly path limits are associated with that identity; account
+  sign-in provides a more durable identity across devices.
+- Vercel path processing uses Next.js `after()` and is bounded by the route's
+  60-second maximum duration. For longer or durable processing, use the included
+  persistent Node/Docker deployment with native Redis and BullMQ.
 
 ## Recently completed
 - **✓ Time-based progress tracking**: Fully implemented with high-water mark, path-level progress calculations, and automatic watch detection
@@ -168,16 +159,13 @@ We've implemented critical fixes to resolve concurrency, rate-limit, and perform
 - To enable monetization/community features later: only backend logic needs to be added, no UI/markup changes required
 
 ## 🚀 Anonymous user path cleanup
-Non-logged-in users (anonymous) have their paths automatically expired after 1 hour:
-- Cookie TTL: 1 hour for anonymous users (deleted on refresh or after 60 minutes)
-- Path TTL: Any anonymous user path older than 1 hour returns 404
-- Daily cleanup job: `/api/cron/cleanup-anonymous-paths` (call via Supabase Cron to permanently delete old anonymous paths/users older than 24h)
-- Authenticated/registered users keep their paths forever (30-day persistent cookie)
+Non-logged-in users (anonymous) retain their identity and paths for 45 days:
+- Cookie TTL: 45 days for anonymous users
+- Path TTL: Any anonymous user path older than 45 days returns 404
+- Cleanup job: `/api/cron/cleanup-anonymous-paths` (call via Supabase Cron to delete expired anonymous paths/users after 45 days)
+- Authenticated users retain their paths while their account exists.
 
 - **Editable syllabus**: insert a review/edit screen between syllabus
   generation and video sourcing in `src/application/generatePath.ts`.
-- **Monetization**: gate `generatePath` calls per month on the free tier —
-  the `LearningPath` table already has `createdAt` and `userId` to count
-  against.
 - **Additional OAuth providers**: add GitHub, Discord, or email/password auth to NextAuth
   in `src/infrastructure/auth/auth.ts` (the NextAuth setup is already production-ready).

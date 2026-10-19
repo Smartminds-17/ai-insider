@@ -5,25 +5,16 @@ import { getServerSession } from "next-auth";
 import { cookies } from "next/headers";
 
 export const COOKIE_NAME = "ai_insider_uid";
+// Keep identity and quota history longer than any calendar month.
+export const ANONYMOUS_IDENTITY_TTL_SECONDS = 45 * 24 * 60 * 60;
 
-// Persistent cookie options for AUTHENTICATED users (30 days)
+// Keep anonymous and authenticated identities stable across monthly quota windows.
 function persistentCookieOptions() {
   return {
     httpOnly: true,
     sameSite: "strict" as const,
     path: "/",
-    maxAge: 30 * 24 * 60 * 60, // 30 days
-    secure: process.env.NODE_ENV === "production",
-  };
-}
-
-// 1-hour TTL cookie for ANONYMOUS users (expires after 1 hour, deleted on refresh/browser close)
-function sessionCookieOptions() {
-  return {
-    httpOnly: true,
-    sameSite: "strict" as const,
-    path: "/",
-    maxAge: 3600, // 1 hour — matches path TTL, deleted after that OR when browser is closed
+    maxAge: ANONYMOUS_IDENTITY_TTL_SECONDS,
     secure: process.env.NODE_ENV === "production",
   };
 }
@@ -76,8 +67,9 @@ export async function getOrCreateUserId(): Promise<string> {
     if (user) return user.id;
   }
 
-  // Create NEW anonymous user — set SESSION-ONLY cookie (deleted on refresh/browser close)
+  // Keep anonymous identity stable across browser restarts so per-user quotas
+  // do not reset every hour or when the browser closes.
   const newUser = await prisma.user.create({ data: {} });
-  cookieStore.set(COOKIE_NAME, newUser.id, sessionCookieOptions());
+  cookieStore.set(COOKIE_NAME, newUser.id, persistentCookieOptions());
   return newUser.id;
 }

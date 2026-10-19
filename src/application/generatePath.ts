@@ -73,7 +73,10 @@ export async function processLearningPathTopics(pathId: string, syllabus: Syllab
       });
 
       const candidates = await searchVideosForTopic(topic.title, 12);
-      const ranked = rankVideos(candidates, MAX_VIDEOS_PER_TOPIC);
+      const ranked = rankVideos(candidates, MAX_VIDEOS_PER_TOPIC, topic.title);
+      if (ranked.length === 0) {
+        throw new Error(`No suitable YouTube videos were found for topic: ${topic.title}`);
+      }
 
       let firstVideoId: string | null = null;
 

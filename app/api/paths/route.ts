@@ -7,6 +7,8 @@ import { rateLimit, rateLimits } from "@/infrastructure/rate-limit";
 import { Redis } from "@upstash/redis";
 import { NextRequest, NextResponse } from "next/server";
 
+export const maxDuration = 60;
+
 const MAX_PROMPT_LENGTH = 300;
 const RATE_LIMIT = 5;
 const RATE_WINDOW_SECONDS = 3600;
@@ -84,7 +86,16 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const localLimit = await rateLimit(req, rateLimits.generatePath);
+  if (process.env.NODE_ENV === "production" && !redis) {
+    return NextResponse.json(
+      { data: null, meta: {}, error: { code: "RATE_LIMIT_UNAVAILABLE", message: "Path generation is temporarily unavailable." } },
+      { status: 503 },
+    );
+  }
+
+  const localLimit = process.env.NODE_ENV === "production"
+    ? { success: true }
+    : await rateLimit(req, rateLimits.generatePath);
   if (!localLimit.success) {
     return NextResponse.json(
       { data: null, meta: {}, error: { code: "RATE_LIMITED", message: "You've created too many paths recently. Please try again in an hour." } },

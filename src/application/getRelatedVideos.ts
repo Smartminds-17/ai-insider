@@ -7,5 +7,5 @@ import type { RankedVideo } from "@/domain/types";
 // not cached to the DB — it's inspirational/exploratory, not core content.
 export async function getRelatedVideos(field: string, count = 4): Promise<RankedVideo[]> {
   const candidates = await searchVideosForTopic(`${field} inspiring talk highlights`, 10);
-  return rankVideos(candidates, count);
+  return rankVideos(candidates, count, field);
 }
