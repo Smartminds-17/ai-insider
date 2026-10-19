@@ -25,29 +25,50 @@ export default function ChatInterface() {
   // Ensure conversations is always an array even if API returns error
   const safeConversations = Array.isArray(conversations) ? conversations : [];
 
-  // Fetch messages when conversation is selected
+  // Load the selected conversation and refresh it when another participant sends a message.
   useEffect(() => {
-    if (selectedConversation) {
-      fetchMessages(selectedConversation.id);
-    }
+    const conversationId = selectedConversation?.id;
+    if (!conversationId) return;
+
+    let cancelled = false;
+    const loadMessages = async () => {
+      try {
+        const res = await fetch(`/api/messages?conversationId=${encodeURIComponent(conversationId)}`);
+        const data = await res.json();
+        if (!cancelled && res.ok && Array.isArray(data)) {
+          setMessages(data);
+        }
+      } catch (error) {
+        if (!cancelled) console.error('Error fetching messages:', error);
+      }
+    };
+
+    void loadMessages();
+
+    const events = new EventSource(`/api/ws?conversationId=${encodeURIComponent(conversationId)}`);
+    const handleChatMessage = (event: Event) => {
+      try {
+        const notification = JSON.parse((event as MessageEvent<string>).data) as { conversationId?: unknown };
+        if (!cancelled && notification.conversationId === conversationId) {
+          void loadMessages();
+        }
+      } catch {
+        // Ignore malformed notifications; message contents come from the authorized API.
+      }
+    };
+    events.addEventListener('chat-message', handleChatMessage);
+
+    return () => {
+      cancelled = true;
+      events.removeEventListener('chat-message', handleChatMessage);
+      events.close();
+    };
   }, [selectedConversation]);
 
   // Scroll to bottom when new messages arrive
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
-
-  const fetchMessages = async (conversationId: string) => {
-    try {
-      const res = await fetch(`/api/messages?conversationId=${conversationId}`);
-      const data = await res.json();
-      if (res.ok) {
-        setMessages(data);
-      }
-    } catch (error) {
-      console.error('Error fetching messages:', error);
-    }
-  };
 
   const sendMessage = async (content: string, options?: { fileUrl?: string; fileName?: string; fileSize?: number; messageType?: 'TEXT' | 'IMAGE' | 'FILE' }) => {
     if (!selectedConversation || !content.trim()) return;
@@ -77,6 +98,9 @@ export default function ChatInterface() {
   };
 
   const handleSelectConversation = (conversation: Conversation) => {
+    if (selectedConversation?.id !== conversation.id) {
+      setMessages([]);
+    }
     setSelectedConversation(conversation);
   };
 

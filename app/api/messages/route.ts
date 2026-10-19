@@ -1,5 +1,6 @@
 import { authOptions } from '@/infrastructure/auth/auth';
 import { prisma } from '@/infrastructure/db/prisma';
+import { publishChatMessageCreated } from '@/infrastructure/redis/chatEvents';
 import { getServerSession } from 'next-auth/next';
 import { NextResponse } from 'next/server';
 
@@ -131,6 +132,8 @@ export async function POST(request: Request) {
       where: { id: conversationId },
       data: { lastMessageAt: new Date() }
     });
+
+    await publishChatMessageCreated(conversationId);
 
     return NextResponse.json(newMessage);
   } catch (error) {

@@ -17,23 +17,39 @@ const encoder = new TextEncoder();
 const clients = new Map<string, Set<ReadableStreamDefaultController<Uint8Array>>>();
 const subscriber = createRedisClient('typing-stream');
 
+function sendToConversation(conversationId: string, payload: Uint8Array) {
+  for (const controller of clients.get(conversationId) ?? []) {
+    try {
+      controller.enqueue(payload);
+    } catch {
+      clients.get(conversationId)?.delete(controller);
+    }
+  }
+}
+
 if (subscriber) {
-  void subscriber.subscribe('typing-events').catch((error) => {
+  void subscriber.subscribe('typing-events', 'chat-message-events').catch((error) => {
     console.error('Failed to subscribe to typing events:', error);
   });
 
   subscriber.on('message', (channel, rawMessage) => {
-    if (channel !== 'typing-events') return;
     try {
-      const event = JSON.parse(rawMessage) as TypingEvent;
-      if (typeof event.conversationId !== 'string' || typeof event.userId !== 'string' || typeof event.isTyping !== 'boolean') return;
-      const payload = encoder.encode(`data: ${JSON.stringify(event)}\n\n`);
-      for (const controller of clients.get(event.conversationId) ?? []) {
-        try {
-          controller.enqueue(payload);
-        } catch {
-          clients.get(event.conversationId)?.delete(controller);
-        }
+      const event = JSON.parse(rawMessage) as { conversationId?: unknown; userId?: unknown; userName?: unknown; isTyping?: unknown };
+      if (typeof event.conversationId !== 'string') return;
+
+      if (channel === 'typing-events') {
+        if (typeof event.userId !== 'string' || typeof event.isTyping !== 'boolean') return;
+        const typingEvent: TypingEvent = {
+          conversationId: event.conversationId,
+          userId: event.userId,
+          userName: typeof event.userName === 'string' ? event.userName : null,
+          isTyping: event.isTyping,
+        };
+        sendToConversation(event.conversationId, encoder.encode(`data: ${JSON.stringify(typingEvent)}\n\n`));
+      } else if (channel === 'chat-message-events') {
+        // Send only a notification. Clients must reload through the membership-checked messages API.
+        const notification = JSON.stringify({ conversationId: event.conversationId });
+        sendToConversation(event.conversationId, encoder.encode(`event: chat-message\ndata: ${notification}\n\n`));
       }
     } catch {
       // Ignore malformed pub/sub messages.

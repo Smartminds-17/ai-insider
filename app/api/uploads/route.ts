@@ -1,5 +1,6 @@
 import { authOptions } from '@/infrastructure/auth/auth';
 import { prisma } from '@/infrastructure/db/prisma';
+import { publishChatMessageCreated } from '@/infrastructure/redis/chatEvents';
 import { createSupabaseServerClient } from '@/infrastructure/supabase/server';
 import { getServerSession } from 'next-auth/next';
 import { NextResponse } from 'next/server';
@@ -118,6 +119,7 @@ export async function POST(request: Request) {
           reactions: { include: { user: { select: { id: true, name: true } } } },
         },
       });
+      await publishChatMessageCreated(conversationId);
       return NextResponse.json(message);
     } catch (messageError) {
       await supabase.storage.from('chat-images').remove([filePath]);
