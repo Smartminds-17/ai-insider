@@ -1,9 +1,7 @@
 import { authOptions } from '@/infrastructure/auth/auth';
-import { PrismaClient } from '@prisma/client';
+import { prisma } from '@/infrastructure/db/prisma';
 import { getServerSession } from 'next-auth/next';
 import { NextResponse } from 'next/server';
-
-const prisma = new PrismaClient();
 
 // helper function 
 function toTag(str: string): string {

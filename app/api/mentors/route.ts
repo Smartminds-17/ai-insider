@@ -1,10 +1,8 @@
 import { authOptions } from '@/infrastructure/auth/auth';
+import { prisma } from '@/infrastructure/db/prisma';
 import type { Prisma } from '@prisma/client';
-import { PrismaClient } from '@prisma/client';
 import { getServerSession } from 'next-auth/next';
 import { NextResponse } from 'next/server';
-
-const prisma = new PrismaClient();
 
 export async function GET(request: Request) {
   try {
