@@ -1,6 +1,6 @@
 import { authOptions } from '@/infrastructure/auth/auth';
-import { prisma } from '@/infrastructure/db/prisma';
 import { publishChatMessageCreated } from '@/infrastructure/redis/chatEvents';
+import { prisma } from '@/src/infrastructure/db/prisma';
 import { getServerSession } from 'next-auth/next';
 import { NextResponse } from 'next/server';
 

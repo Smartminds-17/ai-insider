@@ -63,13 +63,19 @@ export async function getOrCreateUserId(): Promise<string> {
   }
 
   if (cookieId) {
-    const user = await prisma.user.findUnique({ where: { id: cookieId } });
+    const user = await prisma.user.findUnique({ 
+      where: { id: cookieId },
+      select: { id: true } // Only select what we actually need - avoids missing column errors
+    });
     if (user) return user.id;
   }
 
   // Keep anonymous identity stable across browser restarts so per-user quotas
   // do not reset every hour or when the browser closes.
-  const newUser = await prisma.user.create({ data: {} });
+  const newUser = await prisma.user.create({ 
+    data: {},
+    select: { id: true } // Only select what we actually need - avoids missing column errors
+  });
   cookieStore.set(COOKIE_NAME, newUser.id, persistentCookieOptions());
   return newUser.id;
 }

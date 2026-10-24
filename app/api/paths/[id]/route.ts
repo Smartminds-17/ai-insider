@@ -1,7 +1,7 @@
 import { getPath } from "@/application/getPath";
 import { ensureLearningCommunity } from "@/application/learningCommunity";
 import { getOrCreateUserId } from "@/infrastructure/auth/getOrCreateUserId";
-import { prisma } from "@/infrastructure/db/prisma";
+import { prisma } from "@/src/infrastructure/db/prisma";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

@@ -1,0 +1,5 @@
+ALTER TABLE "MentorProfile"
+ADD COLUMN "maxMentees" INTEGER NOT NULL DEFAULT 5;
+
+ALTER TABLE "Mentorship"
+ADD COLUMN "requestMessage" VARCHAR(1000);

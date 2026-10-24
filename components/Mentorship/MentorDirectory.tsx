@@ -1,10 +1,13 @@
 'use client';
 
+import { MentorProfile, User } from '@prisma/client';
 import { useState } from 'react';
 import useSWR from 'swr';
-import MentorCard from './MentorCard';
+import MentorProfileCard from './MentorProfileCard';
 
 const fetcher = (url: string) => fetch(url).then(res => res.json());
+
+type MentorWithUser = MentorProfile & { user: User };
 
 export default function MentorDirectory() {
   const [searchTerm, setSearchTerm] = useState('');
@@ -23,7 +26,7 @@ export default function MentorDirectory() {
     'Blockchain', 'UI/UX Design', 'Product Management'
   ];
 
-  const filteredMentors = mentors.filter((mentor: any) => {
+  const filteredMentors = mentors.filter((mentor: { user: { name: string | null }; bio: string | null; expertise: string[] }) => {
     if (searchTerm) {
       const searchLower = searchTerm.toLowerCase();
       const matchesName = mentor.user.name?.toLowerCase().includes(searchLower);
@@ -100,8 +103,8 @@ export default function MentorDirectory() {
         <>
           {filteredMentors.length > 0 ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {filteredMentors.map((mentor: any) => (
-                <MentorCard key={mentor.id} mentor={mentor} />
+              {filteredMentors.map((mentor: MentorWithUser) => (
+                mentor && <MentorProfileCard key={mentor.id} mentor={mentor} />
               ))}
             </div>
           ) : (

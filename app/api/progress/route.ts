@@ -1,8 +1,8 @@
 import { updatePlaybackPosition } from "@/application/trackProgress";
-import { getOrCreateUserId } from "@/infrastructure/auth/getOrCreateUserId";
-import { prisma } from "@/infrastructure/db/prisma";
-import { rateLimit, rateLimits } from "@/infrastructure/rate-limit";
 import { AuthorizationError, verifyVideoAccess } from "@/infrastructure/auth/authorization";
+import { getOrCreateUserId } from "@/infrastructure/auth/getOrCreateUserId";
+import { prisma } from "@/src/infrastructure/db/prisma";
+import { rateLimit, rateLimits } from "@/src/infrastructure/rate-limit";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function POST(req: NextRequest) {

@@ -1,3 +1,4 @@
+// Path generation queue implementation - refreshed 2026-10-24T03:55:00Z
 import { createLearningPath, processLearningPathTopics } from "@/application/generatePath";
 import type { Syllabus } from "@/domain/types";
 import { prisma } from "@/infrastructure/db/prisma";
@@ -55,14 +56,23 @@ const redisConnection = getRedisConnection();
 let pathGenerationQueue: Queue | null = null;
 let pathGenerationWorker: Worker | null = null;
 
-export { pathGenerationQueue, pathGenerationWorker };
-
 // Vercel functions are short-lived and must not host a BullMQ worker. On
 // Vercel, work is registered with Next.js after() below; persistent hosts run
 // the BullMQ worker in their long-lived Node process.
 if (redisConnection && process.env.VERCEL !== "1") {
-  // Create BullMQ queue for production (uses Upstash Redis)
-  pathGenerationQueue = new Queue("path-generation", { connection: redisConnection });
+  // Create BullMQ queue for production (uses Upstash Redis) with proper DLQ configuration
+  pathGenerationQueue = new Queue("path-generation", { 
+    connection: redisConnection,
+    // Default job settings including Dead-Letter Queue configuration
+    defaultJobOptions: {
+      attempts: 3,
+      backoff: {
+        type: "exponential",
+        delay: 5000,
+      },
+      removeOnFail: { count: 0 }, // Keep failed jobs for debugging in DLQ
+    }
+  });
   
   // Create worker to process jobs. The fast phase (LLM call + Goal/LearningPath
   // rows) has already run in queuePathGeneration() by the time a job reaches
@@ -82,7 +92,7 @@ if (redisConnection && process.env.VERCEL !== "1") {
       limiter: {
         max: 5, // Max 5 jobs processed per 1 minute window across all workers
         duration: 60000,
-      }
+      },
     }
   );
 
@@ -100,7 +110,7 @@ if (redisConnection && process.env.VERCEL !== "1") {
 }
 
 // Helper function to add a new path generation job (uses either BullMQ or in-memory queue)
-export async function queuePathGeneration(userId: string, prompt: string): Promise<{ jobId: string }> {
+async function queuePathGeneration(userId: string, prompt: string): Promise<{ jobId: string }> {
   if (process.env.NODE_ENV === "production" && !pathGenerationQueue && process.env.VERCEL !== "1") {
     throw new Error("Path generation is unavailable: configure REDIS_URL for the production worker.");
   }
@@ -126,17 +136,12 @@ export async function queuePathGeneration(userId: string, prompt: string): Promi
     try {
       // Add job to BullMQ queue to process in background. Pass the syllabus we
       // already generated so the worker doesn't call Gemini a second time.
+      // Uses default queue-level job options (DLQ, retries, backoff)
       await pathGenerationQueue.add(
         "generate-path",
         { userId, pathId, syllabus },
         {
-          attempts: 3, // Retry failed jobs up to 3 times
-          backoff: {
-            type: "exponential",
-            delay: 1000, // Start with 1s delay, double each retry
-          },
-          removeOnComplete: true, // Clean up successful jobs
-          removeOnFail: 100, // Keep last 100 failed jobs for debugging
+          removeOnComplete: true, // Clean up successful jobs immediately
         }
       );
     } catch (queueErr) {
@@ -154,7 +159,7 @@ export async function queuePathGeneration(userId: string, prompt: string): Promi
 }
 
 // Helper to restart stuck GENERATING paths (for server reboots or manual retries)
-export async function restartStuckPath(pathId: string, userId: string): Promise<{ jobId: string }> {
+async function restartStuckPath(pathId: string, userId: string): Promise<{ jobId: string }> {
   // Fetch the existing path and its syllabus from the database
   const existingPath = await prisma.learningPath.findUnique({
     where: { id: pathId, userId },
@@ -187,47 +192,20 @@ export async function restartStuckPath(pathId: string, userId: string): Promise<
         "generate-path",
         { userId, pathId, syllabus },
         {
-          attempts: 3,
-          backoff: { type: "exponential", delay: 1000 },
           removeOnComplete: true,
-          removeOnFail: 100,
         }
       );
     } catch (queueErr) {
       await prisma.learningPath.update({ where: { id: pathId }, data: { status: "FAILED" } });
-      throw new Error("Path generation could not be queued.", { cause: queueErr });
+      throw new Error("Path generation could not be restarted.", { cause: queueErr });
     }
   } else {
     void processLearningPathTopics(pathId, syllabus).catch((error) => {
-      console.error("Local path re-generation failed:", error);
+      console.error("Local path restart failed:", error);
     });
   }
-
+  
   return { jobId: pathId };
 }
 
-// Automatically restart all stuck GENERATING paths when server starts (works with or without Redis)
-if (process.env.NODE_ENV === "development") {
-  setTimeout(async () => {
-    try {
-      const stuckPaths = await prisma.learningPath.findMany({
-        where: { status: "GENERATING" },
-        select: { id: true, userId: true, createdAt: true }
-      });
-
-      if (stuckPaths.length > 0) {
-        console.log(`🔄 Found ${stuckPaths.length} stuck generating paths, attempting to restart...`);
-        for (const path of stuckPaths) {
-          // Only restart recent paths to avoid repeatedly reviving old failures.
-          const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-          if (path.createdAt > dayAgo) {
-            console.log(`Restarting path: ${path.id} (local mode: ${!pathGenerationQueue})`);
-            await restartStuckPath(path.id, path.userId);
-          }
-        }
-      }
-    } catch (err) {
-      console.error("Failed to restart stuck paths:", err);
-    }
-  }, 5000); // Wait 5s after server boot to avoid running during startup
-}
+export { getRedisConnection, pathGenerationQueue, pathGenerationWorker, queuePathGeneration, restartStuckPath };

@@ -1,4 +1,5 @@
 import { prisma } from "@/infrastructure/db/prisma";
+import { createRedisClient } from "@/infrastructure/redis/client";
 import { PrismaAdapter } from "@next-auth/prisma-adapter";
 import type { NextAuthOptions } from "next-auth";
 import NextAuth from "next-auth";
@@ -7,6 +8,10 @@ import Google from "next-auth/providers/google";
 import { cookies } from "next/headers";
 
 const ANON_COOKIE_NAME = "ai_insider_uid";
+// Redis lock key prefix for migration locks - replaces in-memory lock for multi-instance production
+const MIGRATION_LOCK_PREFIX = "migration_lock:";
+// Lock TTL: 5 minutes (300s) to prevent deadlocks if a process crashes
+const MIGRATION_LOCK_TTL = 300;
 
 const hasGoogleCredentials = process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET;
 
@@ -42,7 +47,21 @@ export const authOptions: NextAuthOptions = {
       // Fire AND FORGET the migration - don't block the sign-in flow!
       // This fixes the 5-6s OAuth callback delay while still migrating data
       (async () => {
+        const redis = createRedisClient("anon-migration");
+        const lockKey = `${MIGRATION_LOCK_PREFIX}${anonUserId}`;
+        
         try {
+          // Only attempt Redis lock if client is available; otherwise fall back to basic execution
+          // This maintains backward compatibility with local development without Redis
+          if (redis) {
+            // Acquire Redis lock with SETNX (only set if key doesn't exist) + EX to auto-expire
+            const lockAcquired = await redis.set(lockKey, "1", "EX", MIGRATION_LOCK_TTL, "NX");
+            if (!lockAcquired) {
+              console.log("Migration already in progress for anon user:", anonUserId);
+              return;
+            }
+          }
+
           const anonUser = await prisma.user.findUnique({ where: { id: anonUserId } });
           if (!anonUser) return; // already migrated (or never existed) — nothing to do
 
@@ -60,6 +79,12 @@ export const authOptions: NextAuthOptions = {
           console.log("Successfully migrated anonymous user data to", user.id);
         } catch (err) {
           console.error("Anonymous path migration failed", err);
+        } finally {
+          // Cleanup Redis client if it was created
+          if (redis) {
+            await redis.del(lockKey).catch(() => {});
+            await redis.quit().catch(() => {});
+          }
         }
       })();
     },

@@ -151,24 +151,29 @@ export async function searchVideosForTopic(
   topic: string,
   maxResults = 12
 ): Promise<CandidateVideo[]> {
-  // Check cache first to avoid redundant API calls
-  const normalizedTopic = topic.trim().toLocaleLowerCase();
-  const cacheKey = `${normalizedTopic}:${maxResults}`;
-  const cached = searchCache.get(cacheKey);
-  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-    return cached.data;
-  }
+  const timeoutPromise = new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error(`YouTube search for "${topic}" timed out after 2 minutes`)), 120000)
+  );
 
-  const persistentCache = await prisma.youTubeTopicCache.findUnique({
-    where: { topicKey: cacheKey },
-  });
-  if (persistentCache && Date.now() - persistentCache.cachedAt.getTime() < PERSISTENT_CACHE_TTL) {
-    const videos = persistentCache.videos as unknown as CandidateVideo[];
-    searchCache.set(cacheKey, { data: videos, timestamp: Date.now() });
-    return videos;
-  }
+  const searchPromise = (async () => {
+    // Check cache first to avoid redundant API calls
+    const normalizedTopic = topic.trim().toLocaleLowerCase();
+    const cacheKey = `${normalizedTopic}:${maxResults}`;
+    const cached = searchCache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+      return cached.data;
+    }
 
-  const apiKey = process.env.YOUTUBE_API_KEY;
+    const persistentCache = await prisma.youTubeTopicCache.findUnique({
+      where: { topicKey: cacheKey },
+    });
+    if (persistentCache && Date.now() - persistentCache.cachedAt.getTime() < PERSISTENT_CACHE_TTL) {
+      const videos = persistentCache.videos as unknown as CandidateVideo[];
+      searchCache.set(cacheKey, { data: videos, timestamp: Date.now() });
+      return videos;
+    }
+
+    const apiKey = process.env.YOUTUBE_API_KEY;
     if (!apiKey) {
       throw new Error("YouTube sourcing is unavailable: YOUTUBE_API_KEY is not configured.");
     }
@@ -263,4 +268,7 @@ export async function searchVideosForTopic(
       console.warn("YouTube sourcing failed for topic:", topic, err);
       throw err;
     }
+  })();
+
+  return Promise.race([searchPromise, timeoutPromise]);
 }

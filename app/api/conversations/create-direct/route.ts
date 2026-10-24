@@ -1,5 +1,5 @@
 import { authOptions } from '@/infrastructure/auth/auth';
-import { prisma } from '@/infrastructure/db/prisma';
+import { prisma } from '@/src/infrastructure/db/prisma';
 import { getServerSession } from 'next-auth/next';
 import { NextResponse } from 'next/server';
 
@@ -40,30 +40,35 @@ export async function POST(request: Request) {
       where: {
         type: 'DIRECT',
         AND: [
-          { participants: { some: { userId: currentUser.id } } },
-          { participants: { some: { userId: targetUserId } } },
-          { participants: { every: { userId: { in: [currentUser.id, targetUserId] } } } },
+          { ConversationParticipant: { some: { userId: currentUser.id } } },
+          { ConversationParticipant: { some: { userId: targetUserId } } },
+          { ConversationParticipant: { every: { userId: { in: [currentUser.id, targetUserId] } } } },
         ]
       },
       include: {
-        participants: {
+        ConversationParticipant: {
           include: {
-            user: { select: { id: true, name: true, image: true, email: true, isOnline: true, lastActiveAt: true } }
+            User: { select: { id: true, name: true, image: true, email: true, isOnline: true, lastActiveAt: true } }
           }
         }
       }
     });
 
-    // If it exists, return it
+    // If it exists, return it mapped to frontend keys
     if (existingConversation) {
-      return NextResponse.json(existingConversation);
+      const { ConversationParticipant, ...rest } = existingConversation;
+      const mapped = {
+        ...rest,
+        participants: ConversationParticipant.map(p => ({ ...p, user: p.User }))
+      };
+      return NextResponse.json(mapped);
     }
 
     // If not, create a new direct conversation
     const newConversation = await prisma.conversation.create({
       data: {
         type: 'DIRECT',
-        participants: {
+        ConversationParticipant: {
           create: [
             { userId: currentUser.id },
             { userId: targetUserId }
@@ -72,15 +77,21 @@ export async function POST(request: Request) {
         memberCount: 2
       },
       include: {
-        participants: {
+        ConversationParticipant: {
           include: {
-            user: { select: { id: true, name: true, image: true, email: true, isOnline: true, lastActiveAt: true } }
+            User: { select: { id: true, name: true, image: true, email: true, isOnline: true, lastActiveAt: true } }
           }
         }
       }
     });
 
-    return NextResponse.json(newConversation);
+    // Map to frontend expected keys
+    const { ConversationParticipant: convParticipants, ...rest } = newConversation;
+    const mappedNew = {
+      ...rest,
+      participants: convParticipants.map(p => ({ ...p, user: p.User }))
+    };
+    return NextResponse.json(mappedNew);
   } catch (error) {
     console.error('Error creating direct conversation:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

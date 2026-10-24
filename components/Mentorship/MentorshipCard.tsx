@@ -3,8 +3,10 @@
 import { Calendar, Check, MessageCircle, Star, X } from 'lucide-react';
 import { useState } from 'react';
 
+import { Mentorship } from "@/app/types/mentorship";
+
 interface MentorshipCardProps {
-  mentorship: any;
+  mentorship: Mentorship;
   isMentee: boolean;
 }
 

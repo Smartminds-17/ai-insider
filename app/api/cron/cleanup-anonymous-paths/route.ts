@@ -1,5 +1,5 @@
-import { prisma } from "@/infrastructure/db/prisma";
 import { ANONYMOUS_IDENTITY_TTL_SECONDS } from "@/infrastructure/auth/getOrCreateUserId";
+import { prisma } from "@/src/infrastructure/db/prisma";
 import { NextRequest, NextResponse } from "next/server";
 import { timingSafeEqual } from "node:crypto";
 

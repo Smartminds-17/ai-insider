@@ -1,9 +1,11 @@
-import type { Syllabus } from "@/domain/types";
 import { assignLearningCommunity } from "@/application/learningCommunity";
+import type { Syllabus } from "@/domain/types";
 import { prisma } from "@/infrastructure/db/prisma";
 import { generateSyllabus } from "@/infrastructure/llm/syllabusGenerator";
+import { queuePathGeneration } from "@/infrastructure/queues/pathGeneration.queue";
 import { rankVideos } from "@/infrastructure/youtube/rankVideos";
 import { searchVideosForTopic } from "@/infrastructure/youtube/youtubeClient";
+import { Video } from "@prisma/client";
 
 // Upper bound only — rankVideos() will return fewer when a topic is well
 // covered by one or two videos, rather than always padding to this count.
@@ -62,79 +64,92 @@ export async function processLearningPathTopics(pathId: string, syllabus: Syllab
     if (!existingPath || existingPath.status === "READY") return;
 
     const processTopic = async (topic: { title: string; order: number }) => {
-      const createdTopic = await prisma.topic.upsert({
-        where: { learningPathId_order: { learningPathId: pathId, order: topic.order } },
-        update: { title: topic.title },
-        create: {
-          learningPathId: pathId,
-          title: topic.title,
-          order: topic.order,
-        },
-      });
+      try {
+        const createdTopic = await prisma.topic.upsert({
+          where: { learningPathId_order: { learningPathId: pathId, order: topic.order } },
+          update: { title: topic.title },
+          create: {
+            learningPathId: pathId,
+            title: topic.title,
+            order: topic.order,
+          },
+        });
 
-      const candidates = await searchVideosForTopic(topic.title, 12);
-      const ranked = rankVideos(candidates, MAX_VIDEOS_PER_TOPIC, topic.title);
-      if (ranked.length === 0) {
-        throw new Error(`No suitable YouTube videos were found for topic: ${topic.title}`);
-      }
+        const candidates = await searchVideosForTopic(topic.title, 12);
+        const ranked = rankVideos(candidates, MAX_VIDEOS_PER_TOPIC, topic.title);
+        if (ranked.length === 0) {
+          throw new Error(`No suitable YouTube videos were found for topic: ${topic.title}`);
+        }
 
-      let firstVideoId: string | null = null;
+        let firstVideoId: string | null = null;
 
-      // Create all video records in parallel first (to avoid duplicates)
-      const videos = await Promise.all(
-        ranked.map((v) =>
-          prisma.video.upsert({
-            where: { youtubeVideoId: v.youtubeVideoId },
-            update: {
-              title: v.title,
-              channelTitle: v.channelTitle,
-              thumbnailUrl: v.thumbnailUrl,
-              durationSec: v.durationSec,
-              viewCount: v.viewCount,
-              publishedAt: new Date(v.publishedAt),
-            },
-            create: {
-              youtubeVideoId: v.youtubeVideoId,
-              title: v.title,
-              channelTitle: v.channelTitle,
-              thumbnailUrl: v.thumbnailUrl,
-              durationSec: v.durationSec,
-              viewCount: v.viewCount,
-              publishedAt: new Date(v.publishedAt),
-            },
+        // Create all video records in parallel first (to avoid duplicates)
+        const videos = await Promise.all(
+          ranked.map(async (v) => {
+            try {
+              return await prisma.video.upsert({
+                where: { youtubeVideoId: v.youtubeVideoId },
+                update: {
+                  title: v.title,
+                  channelTitle: v.channelTitle,
+                  thumbnailUrl: v.thumbnailUrl,
+                  durationSec: v.durationSec,
+                  viewCount: v.viewCount,
+                  publishedAt: new Date(v.publishedAt),
+                },
+                create: {
+                  youtubeVideoId: v.youtubeVideoId,
+                  title: v.title,
+                  channelTitle: v.channelTitle,
+                  thumbnailUrl: v.thumbnailUrl,
+                  durationSec: v.durationSec,
+                  viewCount: v.viewCount,
+                  publishedAt: new Date(v.publishedAt),
+                },
+              });
+            } catch (error) {
+              console.error(`Failed to upsert video ${v.youtubeVideoId}:`, error);
+              return null;
+            }
           })
-        )
-      );
+        );
 
-      // Process topic-video associations sequentially to maintain order
-      for (let i = 0; i < videos.length; i++) {
-        const video = videos[i];
-        if (i === 0) firstVideoId = video.id;
+        const validVideos = videos.filter((v) => v !== null) as Video[];
 
-        // Use upsert to avoid unique constraint violations if the same video is reused for multiple topics
-        await prisma.topicVideo.upsert({
-          where: {
-            topicId_videoId: {
+        // Process topic-video associations sequentially to maintain order
+        for (let i = 0; i < validVideos.length; i++) {
+          const video = validVideos[i];
+          if (i === 0) firstVideoId = video.id;
+
+          // Use upsert to avoid unique constraint violations if the same video is reused for multiple topics
+          await prisma.topicVideo.upsert({
+            where: {
+              topicId_videoId: {
+                topicId: createdTopic.id,
+                videoId: video.id,
+              },
+            },
+            update: {}, // If it exists, do nothing
+            create: {
               topicId: createdTopic.id,
               videoId: video.id,
+              order: i,
+              source: "GENERATED",
+              selected: i === 0,
             },
-          },
-          update: {}, // If it exists, do nothing
-          create: {
-            topicId: createdTopic.id,
-            videoId: video.id,
-            order: i,
-            source: "GENERATED",
-            selected: i === 0,
-          },
-        });
-      }
+          });
+        }
 
-      if (firstVideoId) {
-        await prisma.topic.update({
-          where: { id: createdTopic.id },
-          data: { selectedVideoId: firstVideoId },
-        });
+        if (firstVideoId) {
+          await prisma.topic.update({
+            where: { id: createdTopic.id },
+            data: { selectedVideoId: firstVideoId },
+          });
+        }
+      } catch (error) {
+        console.error(`Failed to process topic "${topic.title}":`, error);
+        // Re-throw the error to be caught by the main try...catch block
+        throw error;
       }
     };
 
@@ -162,16 +177,10 @@ export async function processLearningPathTopics(pathId: string, syllabus: Syllab
 
 /**
  * Convenience wrapper for callers that don't need the two phases split
- * apart (e.g. local dev without a queue). Runs both phases, returning the
- * pathId immediately and a processingPromise for the slow phase so the
- * caller can await it (or hand it to waitUntil()) without blocking the
- * fast phase.
+ * apart (e.g. local dev without a queue). Runs the fast phase, then
+ * publishes the slow phase to the unified BullMQ queue (or inline locally).
  */
-export async function generatePath(
-  userId: string,
-  prompt: string
-): Promise<{ pathId: string; processingPromise: Promise<void> }> {
-  const { pathId, syllabus } = await createLearningPath(userId, prompt);
-  const processingPromise = processLearningPathTopics(pathId, syllabus);
-  return { pathId, processingPromise };
+export async function generatePath(userId: string, prompt: string): Promise<{ pathId: string }> {
+  const { jobId } = await queuePathGeneration(userId, prompt);
+  return { pathId: jobId };
 }

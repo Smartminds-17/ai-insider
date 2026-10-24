@@ -1,7 +1,7 @@
-import { authOptions } from '@/infrastructure/auth/auth';
-import { prisma } from '@/infrastructure/db/prisma';
 import { publishChatMessageCreated } from '@/infrastructure/redis/chatEvents';
 import { createSupabaseServerClient } from '@/infrastructure/supabase/server';
+import { authOptions } from '@/src/infrastructure/auth/auth';
+import { prisma } from '@/src/infrastructure/db/prisma';
 import { getServerSession } from 'next-auth/next';
 import { NextResponse } from 'next/server';
 
@@ -55,7 +55,14 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Conversation ID is required' }, { status: 400 });
     }
     if (file.size > MAX_FILE_SIZE) {
+      console.warn(`File size exceeded by user ${currentUser.id}: ${file.size} bytes`);
       return NextResponse.json({ error: 'File too large. Maximum image size is 10MB' }, { status: 400 });
+    }
+
+    // Additional filename sanitation - block malicious paths/names
+    if (file.name && (file.name.includes('..') || file.name.includes('/') || file.name.includes('\\'))) {
+      console.warn(`Malicious filename attempt by user ${currentUser.id}: ${file.name}`);
+      return NextResponse.json({ error: 'Invalid filename' }, { status: 400 });
     }
 
     // 3. Are they allowed to post here? This runs BEFORE anything is stored,
@@ -65,6 +72,7 @@ export async function POST(request: Request) {
       select: { id: true },
     });
     if (!participant) {
+      console.warn(`Unauthorized upload attempt by user ${currentUser.id} to conversation ${conversationId}`);
       return NextResponse.json({ error: 'Not authorized to send messages in this conversation' }, { status: 403 });
     }
 

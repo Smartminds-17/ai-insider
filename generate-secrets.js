@@ -1,5 +1,5 @@
 // Run this with: node generate-secrets.js to create your production secrets
-const crypto = require('crypto');
+import crypto from 'crypto';
 
 console.log('🔐 Generate these secrets for your Vercel environment variables:\n');
 

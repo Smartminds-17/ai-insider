@@ -1,6 +1,6 @@
-import { NextRequest, NextResponse } from "next/server";
 import { getRelatedVideos } from "@/application/getRelatedVideos";
-import { rateLimit, rateLimits } from "@/infrastructure/rate-limit";
+import { rateLimit, rateLimits } from "@/src/infrastructure/rate-limit";
+import { NextRequest, NextResponse } from "next/server";
 
 export async function GET(req: NextRequest) {
   const { success } = await rateLimit(req, rateLimits.public);

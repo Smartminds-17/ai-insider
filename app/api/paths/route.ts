@@ -1,9 +1,9 @@
 import { getUserPaths } from "@/application/getUserPaths";
 import { ensureLearningCommunity } from "@/application/learningCommunity";
 import { getOrCreateUserId } from "@/infrastructure/auth/getOrCreateUserId";
-import { prisma } from "@/infrastructure/db/prisma";
 import { queuePathGeneration } from "@/infrastructure/queues/pathGeneration.queue";
-import { rateLimit, rateLimits } from "@/infrastructure/rate-limit";
+import { prisma } from "@/src/infrastructure/db/prisma";
+import { rateLimit, rateLimits } from "@/src/infrastructure/rate-limit";
 import { Redis } from "@upstash/redis";
 import { NextRequest, NextResponse } from "next/server";
 

@@ -1,5 +1,5 @@
 import { authOptions } from '@/infrastructure/auth/auth';
-import { prisma } from '@/infrastructure/db/prisma';
+import { prisma } from '@/src/infrastructure/db/prisma';
 import { getServerSession } from 'next-auth/next';
 import { NextResponse } from 'next/server';
 
@@ -29,14 +29,14 @@ export async function GET() {
     // Get all conversations the user is part of
     const conversations = await prisma.conversation.findMany({
       where: {
-        participants: {
+        ConversationParticipant: {
           some: { userId: currentUser.id }
         }
       },
       include: {
-        participants: {
+        ConversationParticipant: {
           include: {
-            user: { select: { id: true, name: true, image: true, email: true, isOnline: true, lastActiveAt: true } }
+            User: { select: { id: true, name: true, image: true, email: true, isOnline: true, lastActiveAt: true } }
           }
         },
         messages: {
@@ -51,16 +51,26 @@ export async function GET() {
 
     // Process conversations to sort direct chats with online users first
     const processedConversations = conversations.map(conv => {
-      if (conv.type === 'DIRECT') {
+      // Rename ConversationParticipant to participants for frontend compatibility
+      const { ConversationParticipant, ...rest } = conv;
+      const convWithFrontendKeys = {
+        ...rest,
+        participants: ConversationParticipant.map(p => ({
+          ...p,
+          user: p.User // Map User to user for frontend type compatibility
+        }))
+      };
+      
+      if (convWithFrontendKeys.type === 'DIRECT') {
         // Get the other user's online status
-        const otherUser = conv.participants.find(p => p.userId !== currentUser.id)?.user;
+        const otherUser = convWithFrontendKeys.participants.find(p => p.userId !== currentUser.id)?.user;
         return {
-          ...conv,
+          ...convWithFrontendKeys,
           _sortKey: otherUser?.isOnline ? 0 : 1, // Online first (0 comes before 1)
           otherUserOnline: otherUser?.isOnline || false
         };
       }
-      return { ...conv, _sortKey: 2, otherUserOnline: false };
+      return { ...convWithFrontendKeys, _sortKey: 2, otherUserOnline: false };
     }).sort((a, b) => {
       // First sort by online status, then by lastMessageAt
       if (a._sortKey !== b._sortKey) return a._sortKey - b._sortKey;
@@ -129,9 +139,9 @@ export async function POST(request: Request) {
         where: {
           type: 'DIRECT',
           AND: [
-            { participants: { every: { userId: { in: [currentUser.id, targetUserId] } } } },
-            { participants: { some: { userId: currentUser.id } } },
-            { participants: { some: { userId: targetUserId } } },
+            { ConversationParticipant: { every: { userId: { in: [currentUser.id, targetUserId] } } } },
+            { ConversationParticipant: { some: { userId: currentUser.id } } },
+            { ConversationParticipant: { some: { userId: targetUserId } } },
           ],
         }
       });
@@ -144,7 +154,7 @@ export async function POST(request: Request) {
       const newConversation = await prisma.conversation.create({
         data: {
           type: 'DIRECT',
-          participants: {
+          ConversationParticipant: {
             create: [
               { userId: currentUser.id, role: 'MEMBER' },
               { userId: targetUserId, role: 'MEMBER' }
@@ -152,14 +162,23 @@ export async function POST(request: Request) {
           }
         },
         include: {
-          participants: {
+          ConversationParticipant: {
             include: { user: { select: { id: true, name: true, image: true, email: true } } }
           }
         }
       });
 
+      // Map to frontend expected keys
+      const { ConversationParticipant, ...rest } = newConversation;
+      const mappedConversation = {
+        ...rest,
+        participants: ConversationParticipant.map(p => ({
+          ...p,
+          user: p.User
+        }))
+      };
       console.log(`✅ Created new DIRECT conversation: ${newConversation.id} between ${currentUser.id} and ${participantIds[0]}`);
-      return NextResponse.json(newConversation);
+      return NextResponse.json(mappedConversation);
     }
     
     // Create group chat (can be auto-created for learning paths)
@@ -254,26 +273,35 @@ export async function POST(request: Request) {
       }
 
       const newGroup = await prisma.conversation.create({
-    data: {
-      type: 'GROUP',
-      name: groupName,
-      learningPathId: learningPathId || null,
-      topicTags: topicTags,
-      participants: {
-        create: allParticipants.map((userId: string) => ({
-          userId,
-          role: userId === currentUser.id ? 'ADMIN' : 'MEMBER'
-        }))
-      }
-    },
-    include: {
-      participants: {
-        include: { user: { select: { id: true, name: true, image: true, email: true } } }
-      }
-    }
-  });
+        data: {
+          type: 'GROUP',
+          name: groupName,
+          learningPathId: learningPathId || null,
+          topicTags: topicTags,
+          ConversationParticipant: {
+            create: allParticipants.map((userId: string) => ({
+              userId,
+              role: userId === currentUser.id ? 'ADMIN' : 'MEMBER'
+            }))
+          }
+        },
+        include: {
+          ConversationParticipant: {
+            include: { User: { select: { id: true, name: true, image: true, email: true } } }
+          }
+        }
+      });
 
-  console.log(`✅ Created new GROUP conversation: ${newGroup.id} "${groupName}" with ${allParticipants.length} participants`);
+  // Map to frontend expected keys
+      const { ConversationParticipant: groupParticipants, ...groupRest } = newGroup;
+      const mappedGroup = {
+        ...groupRest,
+        participants: groupParticipants.map(p => ({
+          ...p,
+          user: p.User
+        }))
+      };
+      console.log(`✅ Created new GROUP conversation: ${newGroup.id} "${groupName}" with ${allParticipants.length} participants`);
 
       // Add welcome system message
       await prisma.message.create({
@@ -285,7 +313,7 @@ export async function POST(request: Request) {
         }
       });
 
-      return NextResponse.json(newGroup);
+      return NextResponse.json(mappedGroup);
     }
 
     return NextResponse.json({ error: 'Invalid conversation type' }, { status: 400 });

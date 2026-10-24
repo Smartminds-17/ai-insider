@@ -1,6 +1,6 @@
 import { getCommunityRoot } from "@/domain/communityRoot";
-import type { Prisma } from "@prisma/client";
 import { prisma } from "@/infrastructure/db/prisma";
+import type { Prisma } from "@prisma/client";
 
 /** Create or reuse the learner's topic community inside an existing transaction. */
 export async function assignLearningCommunity(
@@ -55,11 +55,11 @@ export async function ensureLearningCommunity(userId: string, prompt: string): P
     where: { communityKey: root.key },
     select: {
       id: true,
-      participants: { where: { userId }, select: { id: true }, take: 1 },
+      ConversationParticipant: { where: { userId }, select: { id: true }, take: 1 },
     },
   });
 
-  if (existing?.participants.length) return existing.id;
+  if (existing?.ConversationParticipant.length) return existing.id;
 
   return prisma.$transaction((tx) => assignLearningCommunity(tx, userId, prompt));
 }

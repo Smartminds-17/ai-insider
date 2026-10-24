@@ -1,6 +1,7 @@
 "use client";
 
 import PathHistoryList from "@/components/PathHistoryList";
+import FeatureStatusBanner from "@/components/ui/FeatureStatusBanner";
 import type { PathSummary } from "@/domain/types";
 import Link from "next/link";
 import { useEffect, useState } from "react";
@@ -51,10 +52,13 @@ export default function PathsPage() {
       </main>
     );
   }
-
   return (
     <main className="flex-1 px-5 py-10 sm:px-8 sm:py-16">
       <div className="mx-auto max-w-4xl">
+        <FeatureStatusBanner
+          status="info"
+          message="Path Building is currently in beta. You may experience some issues."
+        />
         <div className="flex flex-wrap items-center gap-2 mb-3">
           <span className="legend-label legend-label--route">Your learning</span>
           <span className="chip chip--ink">

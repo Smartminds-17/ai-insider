@@ -1,5 +1,6 @@
 'use client';
 
+import { Mentorship } from '@/app/types/mentorship';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useSession } from 'next-auth/react';
 import useSWR from 'swr';
@@ -54,8 +55,8 @@ export default function MentorshipDashboard() {
       <TabsContent value="as-mentee">
         {asMentee.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {asMentee.map((mentorship: { id: string }) => (
-              <MentorshipCard key={mentorship.id} mentorship={mentorship} isMentee={true} />
+            {asMentee.map((mentorship: Mentorship) => (
+              mentorship && <MentorshipCard key={mentorship.id} mentorship={mentorship} isMentee={true} />
             ))}
           </div>
         ) : (
@@ -72,8 +73,8 @@ export default function MentorshipDashboard() {
       <TabsContent value="as-mentor">
         {asMentor.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {asMentor.map((mentorship: { id: string }) => (
-              <MentorshipCard key={mentorship.id} mentorship={mentorship} isMentee={false} />
+            {asMentor.map((mentorship: Mentorship) => (
+              mentorship && <MentorshipCard key={mentorship.id} mentorship={mentorship} isMentee={false} />
             ))}
           </div>
         ) : (

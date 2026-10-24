@@ -104,13 +104,29 @@ export default function ChatInterface() {
     setSelectedConversation(conversation);
   };
 
-  // Handle auth errors - redirect to login if unauthorized
-  useEffect(() => {
-    if (conversationsError || (conversations && 'error' in conversations && conversations.error === 'Unauthorized')) {
-      console.log('Unauthorized, redirecting to login');
-      window.location.href = '/api/auth/signin';
-    }
-  }, [conversationsError, conversations]);
+  // Check for unauthorized access and show sign-in prompt instead of redirecting
+  const isUnauthorized = conversations && 'error' in conversations && conversations.error === 'Unauthorized';
+
+  if (isUnauthorized) {
+    return (
+      <div className="surface-card flex h-full items-center justify-center text-[var(--text)]">
+        <div className="text-center max-w-md px-6">
+          <span className="mb-6 inline-flex h-16 w-16 items-center justify-center rounded-2xl border border-[var(--route)]/20 bg-[var(--route)]/10 text-2xl text-[var(--route)]" aria-hidden="true">🔒</span>
+          <p className="legend-label legend-label--route mb-3">Sign in required</p>
+          <h3 className="mb-3 text-2xl font-medium font-display">Unlock your conversations</h3>
+          <p className="text-[var(--text-dim)] mb-8 leading-relaxed">
+            To access your messages, join learning groups, and chat with mentors, please sign in to your account.
+          </p>
+          <button 
+            onClick={() => window.location.href = '/api/auth/signin'}
+            className="btn btn--route"
+          >
+            Sign in to continue
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (conversationsError) {
     return (
