@@ -89,12 +89,12 @@ export async function POST(req: NextRequest) {
     try {
       await prisma.user.update({
         where: {
-          stripeCustomerId,
+          stripe_customer_id: stripeCustomerId, // Correct Prisma snake_case field name
         },
         data: {
-          stripeSubscriptionId: subscriptionId,
-          stripePriceId: items.data[0].price.id,
-          stripeCurrentPeriodEnd: new Date(currentPeriodEnd * 1000),
+          stripe_subscription_id: subscriptionId, // Correct Prisma snake_case field name
+          stripe_price_id: items.data[0].price.id, // Correct Prisma snake_case field name
+          stripe_current_period_end: new Date(currentPeriodEnd * 1000), // Correct Prisma snake_case field name
         },
       });
       console.log(`✅ Subscription ${event.type} for customer ${stripeCustomerId}`);

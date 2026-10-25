@@ -27,11 +27,11 @@ export async function POST(req: NextRequest) {
         id: session.user.id,
       },
       select: {
-        stripeCustomerId: true,
+        stripe_customer_id: true, // Correct Prisma schema field name (snake_case)
       },
     });
 
-    let stripeCustomerId = user?.stripeCustomerId;
+    let stripeCustomerId = user?.stripe_customer_id;
 
     if (!stripeCustomerId) {
       const customer = await stripe.customers.create({
@@ -48,7 +48,7 @@ export async function POST(req: NextRequest) {
           id: session.user.id,
         },
         data: {
-          stripeCustomerId,
+          stripe_customer_id: stripeCustomerId, // Correct Prisma schema field name
         },
       });
     }

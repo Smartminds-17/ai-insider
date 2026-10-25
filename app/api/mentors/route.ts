@@ -18,7 +18,7 @@ export async function GET(request: Request) {
     const mentors = await prisma.mentorProfile.findMany({
       where: whereClause,
       include: {
-        user: { select: { id: true, name: true, image: true, isOnline: true, lastActiveAt: true } }
+        User: { select: { id: true, name: true, image: true, isOnline: true, lastActiveAt: true } }
       },
       skip: (page - 1) * limit,
       take: limit
@@ -27,8 +27,8 @@ export async function GET(request: Request) {
     // Sort: online mentors first, then by average rating (highest first)
     const sortedMentors = [...mentors].sort((a, b) => {
       // First prioritize online status (coerce booleans to numbers for safe comparison)
-      const onlineA = Number(a.user.isOnline);
-      const onlineB = Number(b.user.isOnline);
+      const onlineA = Number(a.User.isOnline);
+      const onlineB = Number(b.User.isOnline);
       if (onlineA !== onlineB) {
         return onlineB - onlineA; // true (1) comes before false (0)
       }
@@ -93,7 +93,7 @@ export async function POST(request: Request) {
         maxMentees,
       },
       include: {
-        user: { select: { id: true, name: true, image: true, isOnline: true, lastActiveAt: true } }
+        User: { select: { id: true, name: true, image: true, isOnline: true, lastActiveAt: true } }
       }
     });
 
@@ -144,7 +144,7 @@ export async function PUT(request: Request) {
       where: { userId: currentUser.id },
       data: updateData,
       include: {
-        user: { select: { id: true, name: true, image: true } }
+        User: { select: { id: true, name: true, image: true } }
       }
     });
 

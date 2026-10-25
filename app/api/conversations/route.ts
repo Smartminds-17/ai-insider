@@ -1,4 +1,4 @@
-import { authOptions } from '@/infrastructure/auth/auth';
+import { authOptions } from '@/src/infrastructure/auth/auth';
 import { prisma } from '@/src/infrastructure/db/prisma';
 import { getServerSession } from 'next-auth/next';
 import { NextResponse } from 'next/server';
@@ -39,11 +39,11 @@ export async function GET() {
             User: { select: { id: true, name: true, image: true, email: true, isOnline: true, lastActiveAt: true } }
           }
         },
-        messages: {
+        Message: {
           orderBy: { createdAt: 'desc' },
           take: 1,
           include: {
-            sender: { select: { id: true, name: true, image: true } }
+            User: { select: { id: true, name: true, image: true } }
           }
         },
       }
@@ -52,12 +52,16 @@ export async function GET() {
     // Process conversations to sort direct chats with online users first
     const processedConversations = conversations.map(conv => {
       // Rename ConversationParticipant to participants for frontend compatibility
-      const { ConversationParticipant, ...rest } = conv;
+      const { ConversationParticipant, Message, ...rest } = conv;
       const convWithFrontendKeys = {
         ...rest,
         participants: ConversationParticipant.map(p => ({
           ...p,
           user: p.User // Map User to user for frontend type compatibility
+        })),
+        messages: Message.map(m => ({
+          ...m,
+          sender: m.User
         }))
       };
       
@@ -134,15 +138,16 @@ export async function POST(request: Request) {
       const targetUser = await prisma.user.findUnique({ where: { id: targetUserId }, select: { id: true } });
       if (!targetUser) return NextResponse.json({ error: 'User not found' }, { status: 404 });
 
-      // Check if conversation already exists between these two users
+      // Check if conversation already exists between these two users (exactly these two users, no more)
       const existingConversation = await prisma.conversation.findFirst({
         where: {
           type: 'DIRECT',
+          memberCount: 2,
           AND: [
             { ConversationParticipant: { every: { userId: { in: [currentUser.id, targetUserId] } } } },
             { ConversationParticipant: { some: { userId: currentUser.id } } },
-            { ConversationParticipant: { some: { userId: targetUserId } } },
-          ],
+            { ConversationParticipant: { some: { userId: targetUserId } } }
+          ]
         }
       });
 
@@ -154,6 +159,7 @@ export async function POST(request: Request) {
       const newConversation = await prisma.conversation.create({
         data: {
           type: 'DIRECT',
+          memberCount: 2,
           ConversationParticipant: {
             create: [
               { userId: currentUser.id, role: 'MEMBER' },
@@ -163,7 +169,7 @@ export async function POST(request: Request) {
         },
         include: {
           ConversationParticipant: {
-            include: { user: { select: { id: true, name: true, image: true, email: true } } }
+            include: { User: { select: { id: true, name: true, image: true, email: true } } }
           }
         }
       });

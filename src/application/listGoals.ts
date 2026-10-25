@@ -17,11 +17,12 @@ interface PathRow {
 
 interface GoalRow {
   id: string;
+  userId: string;
   title: string;
   prompt: string;
   status: string;
   createdAt: Date;
-  paths: PathRow[];
+  LearningPath: PathRow[]; // Match Prisma's capitalized relation name
 }
 
 interface ProgressRow {
@@ -33,7 +34,7 @@ export async function listGoals(userId: string): Promise<GoalSummary[]> {
     where: { userId },
     orderBy: { createdAt: "desc" },
     include: {
-      paths: {
+      LearningPath: { // Correct Prisma relation name (capitalized model from schema)
         orderBy: { createdAt: "desc" },
         take: 1,
         include: {
@@ -48,7 +49,7 @@ export async function listGoals(userId: string): Promise<GoalSummary[]> {
   const goals = rawGoals as unknown as GoalRow[];
 
   const videoIds = goals.flatMap((g) =>
-    g.paths.flatMap((p) => p.topics.flatMap((t) => t.topicVideos.map((tv) => tv.videoId)))
+    g.LearningPath.flatMap((p) => p.topics.flatMap((t) => t.topicVideos.map((tv) => tv.videoId)))
   );
   const progressRows = videoIds.length
     ? ((await prisma.progress.findMany({
@@ -58,9 +59,9 @@ export async function listGoals(userId: string): Promise<GoalSummary[]> {
   const watchedSet = new Set(progressRows.map((p) => p.videoId));
 
   return goals.map((g) => {
-    const path = g.paths[0] ?? null;
+    const path = g.LearningPath[0] ?? null; // Match updated Prisma relation name
     const allVideoIds = path
-      ? path.topics.flatMap((t) => t.topicVideos.map((tv) => tv.videoId))
+      ? path.topics.flatMap((t: any) => t.topicVideos.map((tv: any) => tv.videoId)) // Add explicit any to resolve implicit type errors
       : [];
     return {
       id: g.id,

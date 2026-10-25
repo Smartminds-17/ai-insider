@@ -73,7 +73,7 @@ export async function GET(request: Request) {
   }
 
   const participant = await prisma.conversationParticipant.findFirst({
-    where: { conversationId, user: { email: session.user.email } },
+    where: { conversationId, User: { email: session.user.email } }, // Correct Prisma relation name
     select: { id: true },
   });
   if (!participant) {

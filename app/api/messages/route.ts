@@ -41,7 +41,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'Access denied' }, { status: 403 });
     }
 
-    // Fetch messages with pagination
+    // Fetch messages with pagination (using Prisma's exact relation names from schema)
     const messages = await prisma.message.findMany({
       where: {
         conversationId,
@@ -49,17 +49,25 @@ export async function GET(request: Request) {
         ...(before && { createdAt: { lt: new Date(before) } })
       },
       include: {
-        sender: { select: { id: true, name: true, image: true } },
-        replies: {
-          include: { sender: { select: { id: true, name: true, image: true } } }
+        User: { select: { id: true, name: true, image: true } }, // Prisma schema relation name
+        other_Message: {
+          include: { User: { select: { id: true, name: true, image: true } } }
         },
-        reactions: {
-          include: { user: { select: { id: true, name: true } } }
+        MessageReaction: {
+          include: { User: { select: { id: true, name: true } } }
         }
       },
       orderBy: { createdAt: 'desc' },
       take: limit
     });
+
+    // Map to frontend expected API keys (consistent sender naming across all endpoints)
+    const mappedMessages = messages.map(m => ({
+      ...m,
+      sender: m.User, // Map Prisma's "User" to "sender" for frontend compatibility
+      replies: m.other_Message.map(r => ({ ...r, sender: r.User })),
+      reactions: m.MessageReaction.map(r => ({ ...r, user: r.User }))
+    }));
 
     // Update last read timestamp
     await prisma.conversationParticipant.update({
@@ -67,7 +75,7 @@ export async function GET(request: Request) {
       data: { lastReadAt: new Date() }
     });
 
-    return NextResponse.json(messages.reverse()); // Return in chronological order
+    return NextResponse.json(mappedMessages.reverse()); // Return in chronological order
   } catch (error) {
     console.error('Error fetching messages:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
@@ -109,7 +117,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Access denied' }, { status: 403 });
     }
 
-    // Create the message
+    // Create the message (using Prisma's exact relation names from schema)
     const newMessage = await prisma.message.create({
       data: {
         conversationId,
@@ -122,10 +130,17 @@ export async function POST(request: Request) {
         fileSize: fileSize || null
       },
       include: {
-        sender: { select: { id: true, name: true, image: true } },
-        reactions: true
+        User: { select: { id: true, name: true, image: true } }, // Prisma schema relation name
+        MessageReaction: true
       }
     });
+
+    // Map to frontend expected API keys (consistent sender naming across all endpoints)
+    const mappedNewMessage = {
+      ...newMessage,
+      sender: newMessage.User, // Map Prisma's "User" to "sender" for frontend compatibility
+      reactions: newMessage.MessageReaction
+    };
 
     // Update conversation's lastMessageAt
     await prisma.conversation.update({
@@ -135,7 +150,7 @@ export async function POST(request: Request) {
 
     await publishChatMessageCreated(conversationId);
 
-    return NextResponse.json(newMessage);
+    return NextResponse.json(mappedNewMessage);
   } catch (error) {
     console.error('Error sending message:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
@@ -183,11 +198,16 @@ export async function PATCH(request: Request) {
         editedAt: new Date()
       },
       include: {
-        sender: { select: { id: true, name: true, image: true } }
+        User: { select: { id: true, name: true, image: true } }
       }
     });
 
-    return NextResponse.json(updatedMessage);
+    const mappedUpdatedMessage = {
+      ...updatedMessage,
+      sender: updatedMessage.User
+    };
+
+    return NextResponse.json(mappedUpdatedMessage);
   } catch (error) {
     console.error('Error editing message:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
@@ -222,9 +242,9 @@ export async function DELETE(request: Request) {
     const message = await prisma.message.findUnique({
       where: { id: messageId },
       include: {
-        conversation: {
+        Conversation: {
           include: {
-            participants: {
+            ConversationParticipant: {
               where: { userId: currentUser.id },
               select: { role: true }
             }
@@ -237,7 +257,7 @@ export async function DELETE(request: Request) {
       return NextResponse.json({ error: 'Message not found' }, { status: 404 });
     }
 
-    const userParticipant = message.conversation.participants[0];
+    const userParticipant = message.Conversation.ConversationParticipant[0];
     const canDelete = message.senderId === currentUser.id || 
                       userParticipant?.role === 'ADMIN' || 
                       userParticipant?.role === 'MODERATOR';

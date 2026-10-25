@@ -103,7 +103,7 @@ export async function POST(req: NextRequest) {
         });
 
         const createData: Prisma.MentorProfileCreateInput = {
-            user: { connect: { id: currentUser.id } },
+            User: { connect: { id: currentUser.id } },
             bio: sanitizedData.bio as string | undefined,
             hourlyRate: sanitizedData.hourlyRate as number | undefined,
             expertise: sanitizedData.expertise as string[],

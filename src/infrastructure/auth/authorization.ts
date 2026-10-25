@@ -86,7 +86,7 @@ export async function verifyProgressOwnership(progressId: string, userId: string
 /** Ensures progress may only be recorded for a video exposed by the caller's path. */
 export async function verifyVideoAccess(videoId: string, userId: string): Promise<void> {
   const topicVideo = await prisma.topicVideo.findFirst({
-    where: { videoId, topic: { learningPath: { userId } } },
+    where: { videoId, topic: { LearningPath: { userId } } }, // Correct Prisma relation name (capitalized model)
     select: { id: true },
   });
 

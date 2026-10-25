@@ -60,8 +60,8 @@ export async function rateLimit(
 
 // Preconfigured rate limits for different endpoint types
 export const rateLimits = {
-  // Auth endpoints (strict to prevent brute force)
-  auth: { limit: 10, windowMs: 15 * 60 * 1000 }, // 10 requests per 15 minutes
+  // Auth endpoints (strict to prevent brute force but allow session polling)
+  auth: { limit: 100, windowMs: 15 * 60 * 1000 }, // 100 requests per 15 minutes
   // Path generation (expensive API call, strict limits)
   generatePath: { limit: 5, windowMs: 60 * 60 * 1000 }, // 5 paths per hour
   // General API endpoints

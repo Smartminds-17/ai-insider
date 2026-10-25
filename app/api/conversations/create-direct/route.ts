@@ -1,4 +1,4 @@
-import { authOptions } from '@/infrastructure/auth/auth';
+import { authOptions } from '@/src/infrastructure/auth/auth';
 import { prisma } from '@/src/infrastructure/db/prisma';
 import { getServerSession } from 'next-auth/next';
 import { NextResponse } from 'next/server';
@@ -35,14 +35,15 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
-    // Check if a direct conversation already exists between these two users
+    // Check if a direct conversation already exists between these two users (exactly these two users, no more)
     const existingConversation = await prisma.conversation.findFirst({
       where: {
         type: 'DIRECT',
+        memberCount: 2,
         AND: [
-          { ConversationParticipant: { some: { userId: currentUser.id } } },
-          { ConversationParticipant: { some: { userId: targetUserId } } },
           { ConversationParticipant: { every: { userId: { in: [currentUser.id, targetUserId] } } } },
+          { ConversationParticipant: { some: { userId: currentUser.id } } },
+          { ConversationParticipant: { some: { userId: targetUserId } } }
         ]
       },
       include: {

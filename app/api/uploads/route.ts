@@ -122,9 +122,9 @@ export async function POST(request: Request) {
           fileSize: file.size,
         },
         include: {
-          sender: { select: { id: true, name: true, image: true } },
-          replies: { include: { sender: { select: { id: true, name: true, image: true } } } },
-          reactions: { include: { user: { select: { id: true, name: true } } } },
+          User: { select: { id: true, name: true, image: true } }, // Correct Prisma relation name (sender = User in schema)
+          other_Message: { include: { User: { select: { id: true, name: true, image: true } } } }, // Correct Prisma relation names for replies
+          MessageReaction: { include: { User: { select: { id: true, name: true } } } }, // Correct Prisma relation names for reactions
         },
       });
       await publishChatMessageCreated(conversationId);

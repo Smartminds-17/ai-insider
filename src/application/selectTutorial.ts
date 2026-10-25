@@ -10,7 +10,7 @@ interface TopicWithVideos {
 
 export async function selectTutorial(userId: string, topicId: string, videoId: string) {
   const rawTopic = await prisma.topic.findFirst({
-    where: { id: topicId, learningPath: { userId } },
+    where: { id: topicId, LearningPath: { userId } }, // Correct Prisma relation name (capitalized model)
     include: { topicVideos: true },
   });
   if (!rawTopic) return null;

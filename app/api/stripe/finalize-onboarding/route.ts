@@ -21,18 +21,18 @@ export async function POST(req: NextRequest) {
 
         const currentUser = await prisma.user.findUnique({
             where: { email: session.user.email },
-            include: { mentorProfile: true },
+            include: { MentorProfile: true }, // Correct Prisma relation name (capitalized model)
         });
 
-        if (!currentUser || !currentUser.mentorProfile || !currentUser.mentorProfile.stripeAccountId) {
+        if (!currentUser || !currentUser.MentorProfile || !currentUser.MentorProfile.stripeAccountId) {
             return NextResponse.json({ error: 'Mentor profile or Stripe account not found' }, { status: 404 });
         }
 
-        const stripeAccount = await stripe.accounts.retrieve(currentUser.mentorProfile.stripeAccountId);
+        const stripeAccount = await stripe.accounts.retrieve(currentUser.MentorProfile.stripeAccountId);
 
         if (stripeAccount.charges_enabled) {
             const updatedProfile = await prisma.mentorProfile.update({
-                where: { id: currentUser.mentorProfile.id },
+                where: { id: currentUser.MentorProfile.id },
                 data: { stripeOnboardingComplete: true },
             });
             return NextResponse.json(updatedProfile);

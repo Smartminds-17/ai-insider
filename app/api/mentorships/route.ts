@@ -34,11 +34,11 @@ export async function GET(request: Request) {
       mentorships = await prisma.mentorship.findMany({
         where: { menteeId: currentUser.id },
         include: {
-          mentor: {
-            include: { user: { select: { id: true, name: true, image: true, email: true } } }
+          MentorProfile: { // Prisma schema relation name for mentor
+            include: { User: { select: { id: true, name: true, image: true, email: true } } } // Correct Prisma user relation
           },
-          sessions: { orderBy: { startTime: 'desc' }, take: 5 },
-          reviews: true
+          MentorshipSession: { orderBy: { startTime: 'desc' }, take: 5 }, // Correct Prisma session relation
+          MentorReview: true // Correct Prisma review relation
         },
         orderBy: { createdAt: 'desc' }
       });
@@ -54,9 +54,9 @@ export async function GET(request: Request) {
       mentorships = await prisma.mentorship.findMany({
         where: { mentorId: mentorProfile.id },
         include: {
-          mentee: { select: { id: true, name: true, image: true, email: true } },
-          sessions: { orderBy: { startTime: 'desc' }, take: 5 },
-          reviews: true
+          User: { select: { id: true, name: true, image: true, email: true } }, // Prisma schema relation name for mentee
+          MentorshipSession: { orderBy: { startTime: 'desc' }, take: 5 }, // Correct Prisma session relation
+          MentorReview: true // Correct Prisma review relation
         },
         orderBy: { createdAt: 'desc' }
       });
@@ -64,7 +64,16 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'Must specify asMentee or asMentor' }, { status: 400 });
     }
 
-    return NextResponse.json(mentorships);
+    // Map Prisma's schema relation names to frontend-expected API keys (consistent pattern across all routes)
+    const mappedMentorships = mentorships.map((m: any) => ({
+      ...m,
+      mentor: m.MentorProfile || m.mentor, // Map Prisma's "MentorProfile" to frontend's "mentor" (fallback for existing code)
+      mentee: m.User || m.mentee, // Map Prisma's "User" to frontend's "mentee" (fallback for existing code)
+      sessions: m.MentorshipSession || m.sessions, // Map Prisma's "MentorshipSession" to frontend's "sessions"
+      reviews: m.MentorReview || m.reviews // Map Prisma's "MentorReview" to frontend's "reviews"
+    }));
+
+    return NextResponse.json(mappedMentorships);
   } catch (error) {
     console.error('Error fetching mentorships:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
@@ -112,7 +121,7 @@ export async function POST(request: Request) {
         hourlyRate: true,
         stripeAccountId: true,
         stripeOnboardingComplete: true,
-        user: {
+        User: { // Correct Prisma schema relation name (capitalized model name)
           select: {
             name: true,
             image: true,
@@ -155,8 +164,8 @@ export async function POST(request: Request) {
             price_data: {
               currency: 'usd',
               product_data: {
-                name: `Mentorship with ${mentor.user.name}`,
-                images: mentor.user.image ? [mentor.user.image] : [],
+                name: `Mentorship with ${mentor.User.name}`,
+                images: mentor.User.image ? [mentor.User.image] : [],
               },
               unit_amount: unitAmount,
             },
@@ -217,7 +226,7 @@ export async function PATCH(request: Request) {
 
     const mentorship = await prisma.mentorship.findUnique({
       where: { id: mentorshipId },
-      include: { mentor: true }
+      include: { MentorProfile: true, User: true } // Include both Prisma relations for IDOR check
     });
 
     if (!mentorship) {
@@ -225,8 +234,8 @@ export async function PATCH(request: Request) {
     }
 
     // CRITICAL: Strict IDOR protection - verify user is explicitly part of this mentorship
-    const isMentor = mentorship.mentor.userId === currentUser.id;
-    const isMentee = mentorship.menteeId === currentUser.id;
+    const isMentor = mentorship.MentorProfile.userId === currentUser.id;
+    const isMentee = mentorship.User.id === currentUser.id; // Use Prisma's User relation for mentee ID check
 
     if (!isMentor && !isMentee) {
       console.warn(`Unauthorized access attempt to mentorship ${mentorshipId} by user ${currentUser.id}`);
@@ -260,7 +269,7 @@ export async function PATCH(request: Request) {
       const updatedMentorship = await prisma.$transaction(async (tx) => {
         if (nextStatus === 'ACCEPTED') {
           const activeCount = await tx.mentorship.count({ where: { mentorId: mentorship.mentorId, status: 'ACCEPTED' } });
-          if (!mentorship.mentor.availability || activeCount >= mentorship.mentor.maxMentees) return null;
+          if (!mentorship.MentorProfile.availability || activeCount >= mentorship.MentorProfile.maxMentees) return null;
         }
         const changed = await tx.mentorship.updateMany({
           where: { id: mentorshipId, status: mentorship.status },
@@ -278,14 +287,14 @@ export async function PATCH(request: Request) {
             data: { totalMenteeCount: { increment: 1 } },
           });
 
-          const participantIds = [mentorship.mentor.userId, mentorship.menteeId];
+          const participantIds = [mentorship.MentorProfile.userId, mentorship.User.id];
           await tx.conversation.create({
             data: {
               type: 'DIRECT',
               name: 'Mentorship',
               description: 'Private conversation for this mentorship',
               memberCount: 2,
-              participants: { create: participantIds.map((userId) => ({ userId, role: 'MEMBER' })) },
+              ConversationParticipant: { create: participantIds.map((userId) => ({ userId, role: 'MEMBER' })) }, // Correct Prisma relation name
             },
           });
         }
@@ -293,9 +302,9 @@ export async function PATCH(request: Request) {
         return tx.mentorship.findUnique({
           where: { id: mentorshipId },
           include: {
-            mentor: { include: { user: { select: { id: true, name: true, image: true } } } },
-            mentee: { select: { id: true, name: true, image: true } },
-            sessions: true
+            MentorProfile: { include: { User: { select: { id: true, name: true, image: true } } } }, // Correct Prisma relation names
+            User: { select: { id: true, name: true, image: true } },
+            MentorshipSession: true
           },
         });
       });

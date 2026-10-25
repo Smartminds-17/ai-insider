@@ -22,7 +22,7 @@ export async function GET() {
   const communities = await prisma.conversation.findMany({
     where: {
       type: 'GROUP',
-      participants: { some: { userId: currentUser.id } },
+      ConversationParticipant: { some: { userId: currentUser.id } },
     },
     select: {
       id: true,
