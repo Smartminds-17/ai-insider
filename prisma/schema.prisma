@@ -287,6 +287,9 @@ model User {
   stripe_customer_id        String?                   @unique
   stripe_price_id           String?
   stripe_subscription_id    String?                   @unique
+  // Mentorship credit tracking - only applies to Guided expedition subscribers
+  mentorship_credits_remaining Int                     @default(0)
+  mentorship_credits_last_refreshed DateTime?           @default(now())
   Account                   Account[]
   ConversationParticipant   ConversationParticipant[]
   Goal                      Goal[]

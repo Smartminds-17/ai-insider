@@ -1,8 +1,18 @@
 import { authOptions } from '@/infrastructure/auth/auth';
 import { prisma } from '@/src/infrastructure/db/prisma';
+import type { Mentorship } from '@prisma/client';
 import { getServerSession } from 'next-auth/next';
 import { NextResponse } from 'next/server';
 import Stripe from 'stripe';
+
+// Type guards to safely narrow the Prisma union type before accessing branch-specific properties
+function isAsMenteeMentorship(m: unknown): m is { MentorProfile: unknown; MentorshipSession: unknown[]; MentorReview: unknown[] } {
+  return typeof m === 'object' && m !== null && 'MentorProfile' in m;
+}
+
+function isAsMentorMentorship(m: unknown): m is { User: unknown; MentorshipSession: unknown[]; MentorReview: unknown[] } {
+  return typeof m === 'object' && m !== null && 'User' in m;
+}
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: '2026-09-30.endive',
@@ -17,11 +27,36 @@ export async function GET(request: Request) {
 
     const currentUser = await prisma.user.findUnique({
       where: { email: session.user.email },
-      select: { id: true }
+      select: { 
+        id: true, 
+        stripe_price_id: true,
+        mentorship_credits_remaining: true,
+        mentorship_credits_last_refreshed: true
+      }
     });
 
     if (!currentUser) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
+    }
+
+    // Enforce tier access for mentorship program (per security-principles: least privilege, server-side only)
+    // Tier access order: Only Thru-hike ($9/mo) or Guided expedition ($39/mo) can access mentorship
+    // Map Stripe price IDs to tiers (update with your actual price IDs from Stripe dashboard)
+    const ELIGIBLE_PRICE_IDS = new Set([
+      process.env.STRIPE_THRU_HIKE_PRICE_ID, // $9/mo Thru-hike
+      process.env.STRIPE_GUIDED_EXPEDITION_PRICE_ID // $39/mo Guided expedition
+    ]);
+
+    // Free tier (Day hike) users cannot access mentorship - fail securely
+    if (!currentUser.stripe_price_id || !ELIGIBLE_PRICE_IDS.has(currentUser.stripe_price_id)) {
+      return NextResponse.json(
+        { 
+          error: 'Mentorship program is only available for Thru-hike or Guided expedition subscribers. Upgrade your plan to access this feature.',
+          code: 'INSUFFICIENT_TIER',
+          upgradeRequired: true
+        }, 
+        { status: 403 }
+      );
     }
 
     const { searchParams } = new URL(request.url);
@@ -64,16 +99,39 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'Must specify asMentee or asMentor' }, { status: 400 });
     }
 
-    // Map Prisma's schema relation names to frontend-expected API keys (consistent pattern across all routes)
-    const mappedMentorships = mentorships.map((m: any) => ({
-      ...m,
-      mentor: m.MentorProfile || m.mentor, // Map Prisma's "MentorProfile" to frontend's "mentor" (fallback for existing code)
-      mentee: m.User || m.mentee, // Map Prisma's "User" to frontend's "mentee" (fallback for existing code)
-      sessions: m.MentorshipSession || m.sessions, // Map Prisma's "MentorshipSession" to frontend's "sessions"
-      reviews: m.MentorReview || m.reviews // Map Prisma's "MentorReview" to frontend's "reviews"
-    }));
+    // Map Prisma's schema relation names to frontend-expected API keys (type-safe with guards)
+    const mappedMentorships = mentorships.map((m) => {
+      if (isAsMenteeMentorship(m)) {
+        return {
+          ...m,
+          mentor: m.MentorProfile,
+          sessions: m.MentorshipSession,
+          reviews: m.MentorReview
+        } as Mentorship;
+      } else if (isAsMentorMentorship(m)) {
+        return {
+          ...m,
+          mentee: m.User,
+          sessions: m.MentorshipSession,
+          reviews: m.MentorReview
+        } as Mentorship;
+      }
+      return m as Mentorship;
+    }) as Mentorship[];
 
-    return NextResponse.json(mappedMentorships);
+    // Return user's mentorship credit info for Guided expedition subscribers
+    const isGuidedExpedition = currentUser.stripe_price_id === process.env.STRIPE_GUIDED_EXPEDITION_PRICE_ID;
+    const response = {
+      mentorships: mappedMentorships,
+      ...(isGuidedExpedition ? {
+        mentorshipCredits: {
+          remaining: currentUser.mentorship_credits_remaining,
+          lastRefreshed: currentUser.mentorship_credits_last_refreshed
+        }
+      } : {})
+    };
+
+    return NextResponse.json(response);
   } catch (error) {
     console.error('Error fetching mentorships:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
@@ -97,12 +155,67 @@ export async function POST(request: Request) {
 
     const currentUser = await prisma.user.findUnique({
       where: { email: session.user.email },
-      select: { id: true }
+      select: { id: true, stripe_price_id: true }
     });
 
     if (!currentUser) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
+
+    // Enforce tier access for mentorship program (server-side only, per least privilege)
+        const ELIGIBLE_PRICE_IDS = new Set([
+          process.env.STRIPE_THRU_HIKE_PRICE_ID,
+          process.env.STRIPE_GUIDED_EXPEDITION_PRICE_ID
+        ]);
+        const GUIDED_EXPEDITION_PRICE_ID = process.env.STRIPE_GUIDED_EXPEDITION_PRICE_ID!;
+
+        if (!currentUser.stripe_price_id || !ELIGIBLE_PRICE_IDS.has(currentUser.stripe_price_id)) {
+          return NextResponse.json(
+            { 
+              error: 'Mentorship program is only available for Thru-hike or Guided expedition subscribers.',
+              code: 'INSUFFICIENT_TIER',
+              upgradeRequired: true
+            }, 
+            { status: 403 }
+          );
+        }
+
+        // Enforce mentorship credit limits (Guided expedition gets 2 free/month, Thru-hike pays a la carte)
+        const isGuidedExpedition = currentUser.stripe_price_id === GUIDED_EXPEDITION_PRICE_ID;
+        if (isGuidedExpedition) {
+          // Fetch user's current credit balance
+          const userWithCredits = await prisma.user.findUnique({
+            where: { email: session.user.email },
+            select: { mentorship_credits_remaining: true, mentorship_credits_last_refreshed: true }
+          });
+
+          // Check if credits need to be refreshed (in case webhook missed the renewal)
+          const needsRefresh = !userWithCredits?.mentorship_credits_last_refreshed || 
+            (new Date().getTime() - new Date(userWithCredits.mentorship_credits_last_refreshed).getTime() > 25 * 24 * 60 * 60 * 1000);
+          
+          const remainingCredits = needsRefresh ? 2 : (userWithCredits?.mentorship_credits_remaining ?? 0);
+
+          if (remainingCredits <= 0) {
+            return NextResponse.json(
+              {
+                error: 'You have used all your monthly mentorship credits. You can purchase additional a la carte credits.',
+                code: 'NO_CREDITS_REMAINING',
+                upgradeRequired: false
+              },
+              { status: 403 }
+            );
+          }
+
+          // Deduct one credit from the user's balance
+          await prisma.user.update({
+            where: { email: session.user.email },
+            data: {
+              mentorship_credits_remaining: needsRefresh ? 1 : remainingCredits - 1,
+              mentorship_credits_last_refreshed: needsRefresh ? new Date() : userWithCredits?.mentorship_credits_last_refreshed
+            }
+          });
+          console.log(`✅ Deducted 1 mentorship credit from Guided expedition user ${currentUser.id}`);
+        }
 
     const body = await request.json().catch(() => null);
     const mentorId = typeof body?.mentorId === 'string' ? body.mentorId : '';
@@ -210,7 +323,12 @@ export async function PATCH(request: Request) {
 
     const currentUser = await prisma.user.findUnique({
       where: { email: session.user.email },
-      select: { id: true }
+      select: { 
+        id: true, 
+        stripe_price_id: true,
+        mentorship_credits_remaining: true,
+        mentorship_credits_last_refreshed: true
+      }
     });
 
     if (!currentUser) {

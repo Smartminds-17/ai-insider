@@ -87,17 +87,42 @@ export async function POST(req: NextRequest) {
     const currentPeriodEnd = subscription.current_period_end;
 
     try {
+      const priceId = items.data[0].price.id;
+      const GUIDED_EXPEDITION_PRICE_ID = process.env.STRIPE_GUIDED_EXPEDITION_PRICE_ID!;
+      
+      // Refresh mentorship credits only for Guided expedition subscribers when subscription renews
+      const isGuidedExpedition = priceId === GUIDED_EXPEDITION_PRICE_ID;
+      const existingUser = await prisma.user.findUnique({
+        where: { stripe_customer_id: stripeCustomerId },
+        select: { id: true, mentorship_credits_last_refreshed: true, mentorship_credits_remaining: true }
+      });
+
+      // Only refresh credits if it's a new subscription period (last refreshed was over 25 days ago)
+      const shouldRefreshCredits = isGuidedExpedition && existingUser && (
+        !existingUser.mentorship_credits_last_refreshed || 
+        (new Date().getTime() - new Date(existingUser.mentorship_credits_last_refreshed).getTime() > 25 * 24 * 60 * 60 * 1000)
+      );
+
       await prisma.user.update({
         where: {
-          stripe_customer_id: stripeCustomerId, // Correct Prisma snake_case field name
+          stripe_customer_id: stripeCustomerId,
         },
         data: {
-          stripe_subscription_id: subscriptionId, // Correct Prisma snake_case field name
-          stripe_price_id: items.data[0].price.id, // Correct Prisma snake_case field name
-          stripe_current_period_end: new Date(currentPeriodEnd * 1000), // Correct Prisma snake_case field name
+          stripe_subscription_id: subscriptionId,
+          stripe_price_id: priceId,
+          stripe_current_period_end: new Date(currentPeriodEnd * 1000),
+          // Reset to 2 credits only for Guided expedition users when their subscription renews
+          ...(shouldRefreshCredits ? {
+            mentorship_credits_remaining: 2,
+            mentorship_credits_last_refreshed: new Date()
+          } : {}),
+          // If user downgrades from Guided to a lower tier, set credits to 0
+          ...(!isGuidedExpedition && existingUser?.mentorship_credits_remaining! > 0 ? {
+            mentorship_credits_remaining: 0
+          } : {})
         },
       });
-      console.log(`✅ Subscription ${event.type} for customer ${stripeCustomerId}`);
+      console.log(`✅ Subscription ${event.type} for customer ${stripeCustomerId}${shouldRefreshCredits ? ' - refreshed 2 mentorship credits for Guided expedition' : ''}`);
     } catch (error) {
       console.error(`Failed to handle subscription event ${event.type}:`, error);
     }

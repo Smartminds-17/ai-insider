@@ -2,26 +2,77 @@
 
 import { Mentorship } from '@/app/types/mentorship';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Lock } from 'lucide-react';
 import { useSession } from 'next-auth/react';
+import Link from 'next/link';
 import useSWR from 'swr';
 import MentorshipCard from './MentorshipCard';
 
 const fetcher = (url: string) => fetch(url).then(res => res.json());
 
+// Client-side tier validation (matches server-side logic in layout.tsx)
+function getUserTier(stripePriceId: string | null | undefined) {
+  // Free tier (Day hike) by default
+  if (!stripePriceId) {
+    return { name: "Day hike", chipClass: "chip--ink", isFree: true, canAccessMentorship: false };
+  }
+  
+  // Thru-hike tier ($9/mo) - still no mentorship access
+  if (stripePriceId === process.env.NEXT_PUBLIC_STRIPE_THRU_HIKE_PRICE_ID) {
+    return { name: "Thru-hike", chipClass: "chip--route", isFree: false, canAccessMentorship: false };
+  }
+  
+  // Guided expedition tier ($39/mo) - only tier with mentorship access
+  if (stripePriceId === process.env.NEXT_PUBLIC_STRIPE_GUIDED_EXPEDITION_PRICE_ID) {
+    return { name: "Guided expedition", chipClass: "chip--sage", isFree: false, canAccessMentorship: true };
+  }
+  
+  // Fallback to free tier for unknown price IDs
+  return { name: "Day hike", chipClass: "chip--ink", isFree: true, canAccessMentorship: false };
+}
+
 export default function MentorshipDashboard() {
   const { data: session } = useSession();
+  // @ts-expect-error - session.user includes stripe_price_id from our auth system that's not in the default types
+  const userTier = getUserTier(session?.user?.stripe_price_id);
+  
+  // Only fetch mentorship data if user has access to the program
   const { data: menteeData, error: menteeError, isLoading: menteeLoading } = useSWR(
-    session?.user?.id ? '/api/mentorships?asMentee=true' : null,
+    session?.user?.id && userTier.canAccessMentorship ? '/api/mentorships?asMentee=true' : null,
     fetcher,
   );
   const { data: mentorData, error: mentorError, isLoading: mentorLoading } = useSWR(
-    session?.user?.id ? '/api/mentorships?asMentor=true' : null,
+    session?.user?.id && userTier.canAccessMentorship ? '/api/mentorships?asMentor=true' : null,
     fetcher,
   );
 
   const asMentee = Array.isArray(menteeData) ? menteeData : [];
   const asMentor = Array.isArray(mentorData) ? mentorData : [];
   const isLoading = menteeLoading || mentorLoading;
+
+  // Block access for users who don't meet the tier requirement
+  if (!userTier.canAccessMentorship) {
+    return (
+      <div className="surface-card py-16 text-center max-w-2xl mx-auto">
+        <div className="w-16 h-16 bg-amber-900/30 rounded-full flex items-center justify-center mx-auto mb-6">
+          <Lock size={32} className="text-amber-500" />
+        </div>
+        <h3 className="mb-3 text-2xl font-medium">Mentorship program is locked</h3>
+        <p className="mb-8 text-[var(--text-dim)] text-lg">
+          The 1:1 mentorship program is only available to our Guided expedition subscribers. 
+          Upgrade your plan to unlock access to experienced mentors, scheduled sessions, and personalized guidance.
+        </p>
+        <Link href="/#pricing" className="btn btn--sage inline-flex items-center gap-2 text-lg px-8 py-3">
+          Upgrade to Guided expedition
+        </Link>
+        <div className="mt-8 p-4 bg-[var(--surface-subtle)] rounded-lg">
+          <p className="text-sm text-[var(--text-dim)]">
+            Your current tier: <span className={`chip ${userTier.chipClass} ml-2`}>{userTier.name}</span>
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   if (isLoading) {
     return (

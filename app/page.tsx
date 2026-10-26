@@ -46,7 +46,7 @@ interface PathsResponse {
     <main className="relative flex-1 overflow-hidden px-5 py-12 sm:px-8 sm:py-20">
       <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 z-0 h-[560px] opacity-60" style={{ background: "radial-gradient(ellipse at 50% 0%, rgba(232,163,61,.12), transparent 65%)" }} />
       <div className="relative z-10 mx-auto w-full max-w-5xl">
-        <div className="mb-10 flex flex-wrap items-center justify-center gap-2 sm:mb-14">
+        <div className="mb-10 flex flex-wrap items-center justify-center gap-3 sm:mb-14">
           <span className="legend-label legend-label--route">AI Insider</span>
           <span className="text-[var(--ink-4)]">·</span>
           <span className="chip chip--ink">
@@ -56,6 +56,16 @@ interface PathsResponse {
               : `${displayData.totalMonthlyPaths} path${displayData.totalMonthlyPaths !== 1 ? "s" : ""} created this month`
             }
           </span>
+          {/* Show upgrade button only if logged-in user has reached their monthly limit */}
+          {isLoggedIn && displayData.monthlyUsage >= displayData.monthlyLimit && (
+            <a 
+              href="/pricing" 
+              className="btn btn--route btn--sm"
+              aria-label="Upgrade your plan to create more routes"
+            >
+              Upgrade plan
+            </a>
+          )}
         </div>
 
         <div className="mx-auto max-w-4xl text-center">

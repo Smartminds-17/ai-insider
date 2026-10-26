@@ -3,12 +3,11 @@
 
 "use client"
 
-import { featureFlags } from "@/lib/feature-flags";
-import { loadStripe, Stripe } from "@stripe/stripe-js";
+import { loadStripe } from "@stripe/stripe-js";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
 import { notFound, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 
 type TierId = "day" | "thru" | "guided";
@@ -161,24 +160,20 @@ function TierWaypointLine({ wp, accent }: { wp: TierWaypoint; accent: string; is
 }
 
 export default function PricingPage() {
-  if (!featureFlags.FEATURE_PAYMENTS) {
+  if (process.env.NEXT_PUBLIC_FEATURE_PAYMENTS !== 'true') {
     notFound();
   }
 
   const { data: session, status } = useSession();
   const router = useRouter();
   const [isRedirecting, setIsRedirecting] = useState(false);
-  const [stripe, setStripe] = useState<Stripe | null>(null);
 
-  useEffect(() => {
-    const initializeStripe = async () => {
-      const stripePromise = await loadStripe(
-        process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY!
-      );
-      setStripe(stripePromise);
-    };
-    initializeStripe();
-  }, []);
+  // loadStripe returns a cached promise that @stripe/react-stripe-js expects directly
+  const stripePublishableKey = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY;
+  if (!stripePublishableKey) {
+    console.error('NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY is not set');
+  }
+  const stripePromise = stripePublishableKey ? loadStripe(stripePublishableKey) : null;
 
   const handleSubscribe = async (priceId: string) => {
     if (!session) {
@@ -304,7 +299,13 @@ export default function PricingPage() {
                               <button
                   type="button"
                   className={`btn ${tier.ctaClass} btn--block mt-auto`}
-                  onClick={() => handleSubscribe("price_1UT5K4QloZsKw8ZHpQ47OLGN")}
+                  onClick={() => {
+                    // Use environment variables for Stripe price IDs to maintain consistency
+                    const priceId = tier.id === "guided" 
+                      ? process.env.NEXT_PUBLIC_STRIPE_GUIDED_EXPEDITION_PRICE_ID 
+                      : process.env.NEXT_PUBLIC_STRIPE_THRU_HIKE_PRICE_ID;
+                    if (priceId) handleSubscribe(priceId);
+                  }}
                   disabled={isRedirecting}
                 >
                   {isRedirecting ? "Redirecting..." : tier.ctaLabel}
