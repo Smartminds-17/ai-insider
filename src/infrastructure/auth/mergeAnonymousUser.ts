@@ -79,12 +79,22 @@ export async function mergeAnonymousUser(anonUserId: string, authUserId: string)
         }
     }
 
-    // Add the user deletion to the transaction list
+    // Add the user deletion to the transaction list only if we want to attempt it
+    // The delete will be wrapped in a try/catch at the transaction level to handle P2025 gracefully
     progressTransactions.push(p.user.delete({ where: { id: anonUserId } }));
 
     // Execute all progress operations + deletion in a single transaction
     if (progressTransactions.length > 0) {
-      await p.$transaction(progressTransactions);
+      try {
+        await p.$transaction(progressTransactions);
+      } catch (mergeErr) {
+        // If the user was already deleted (P2025), that's fine - we still succeeded in merging all progress
+        if ((mergeErr as { code?: string }).code === 'P2025') {
+          console.log("ℹ️ Anonymous user was already merged/deleted, skipping deletion:", anonUserId);
+        } else {
+          throw mergeErr; // Re-throw other unexpected errors
+        }
+      }
     }
   } catch (error) {
     // Log the error but don't crash the entire request - anonymous user merge is non-critical

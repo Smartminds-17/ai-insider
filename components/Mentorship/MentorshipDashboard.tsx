@@ -2,9 +2,10 @@
 
 import { Mentorship } from '@/app/types/mentorship';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Lock } from 'lucide-react';
+import { CheckCircle, Lock, XCircle } from 'lucide-react';
 import { useSession } from 'next-auth/react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import useSWR from 'swr';
 import MentorshipCard from './MentorshipCard';
 
@@ -33,6 +34,8 @@ function getUserTier(stripePriceId: string | null | undefined) {
 
 export default function MentorshipDashboard() {
   const { data: session } = useSession();
+  const params = useSearchParams();
+  const paymentStatus = params.get('payment');
   // @ts-expect-error - session.user includes stripe_price_id from our auth system that's not in the default types
   const userTier = getUserTier(session?.user?.stripe_price_id);
   
@@ -97,7 +100,27 @@ export default function MentorshipDashboard() {
   }
 
   return (
-    <Tabs defaultValue="as-mentee" className="w-full">
+    <>
+      {/* Payment status banner */}
+      {paymentStatus === 'success' && (
+        <div className="mb-6 bg-green-900/30 border border-green-700 rounded-lg p-4 flex items-center gap-3">
+          <CheckCircle size={24} className="text-green-500 flex-shrink-0" />
+          <div>
+            <p className="text-green-400 font-medium">Payment successful!</p>
+            <p className="text-green-300/80 text-sm">Your mentorship request has been submitted. The mentor will review it shortly.</p>
+          </div>
+        </div>
+      )}
+      {paymentStatus === 'cancelled' && (
+        <div className="mb-6 bg-amber-900/30 border border-amber-700 rounded-lg p-4 flex items-center gap-3">
+          <XCircle size={24} className="text-amber-500 flex-shrink-0" />
+          <div>
+            <p className="text-amber-400 font-medium">Payment cancelled</p>
+            <p className="text-amber-300/80 text-sm">Your payment was not processed. You can try again when you&apos;re ready.</p>
+          </div>
+        </div>
+      )}
+      <Tabs defaultValue="as-mentee" className="w-full">
       <TabsList className="mb-6">
         <TabsTrigger value="as-mentee">As Mentee ({asMentee.length})</TabsTrigger>
         <TabsTrigger value="as-mentor">As Mentor ({asMentor.length})</TabsTrigger>
@@ -139,5 +162,6 @@ export default function MentorshipDashboard() {
         )}
       </TabsContent>
     </Tabs>
+    </>
   );
 }

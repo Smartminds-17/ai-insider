@@ -1,5 +1,5 @@
-import { authOptions } from '@/infrastructure/auth/auth';
 import { publishChatMessageCreated } from '@/infrastructure/redis/chatEvents';
+import { authOptions } from '@/src/infrastructure/auth/auth';
 import { prisma } from '@/src/infrastructure/db/prisma';
 import { getServerSession } from 'next-auth/next';
 import { NextResponse } from 'next/server';
@@ -78,6 +78,13 @@ export async function GET(request: Request) {
     return NextResponse.json(mappedMessages.reverse()); // Return in chronological order
   } catch (error) {
     console.error('Error fetching messages:', error);
+    // Handle database connectivity errors gracefully
+    if ((error as { code?: string }).code === 'P1001' || (error as { code?: string }).code === 'P2024') {
+      return NextResponse.json({ 
+        error: "Service temporarily unavailable",
+        retryAfter: 30
+      }, { status: 503, headers: { 'Retry-After': '30' } });
+    }
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

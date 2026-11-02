@@ -192,14 +192,22 @@ export default function PricingPage() {
         body: JSON.stringify({ priceId }),
       });
 
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error("Subscription API error:", errorData);
+        setIsRedirecting(false);
+        return;
+      }
+
       const { url } = await response.json();
 
-        if (url) {
-          window.location.href = url;
-        } else {
-          console.error("No checkout URL returned");
-          setIsRedirecting(false);
-        }
+      if (url) {
+        console.log("Redirecting to Stripe checkout:", url);
+        window.location.href = url;
+      } else {
+        console.error("No checkout URL returned from API");
+        setIsRedirecting(false);
+      }
     } catch (error) {
       console.error("Subscription error:", error);
       setIsRedirecting(false);

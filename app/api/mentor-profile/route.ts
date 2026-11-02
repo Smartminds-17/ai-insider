@@ -1,6 +1,6 @@
-import { authOptions } from '@/infrastructure/auth/auth';
 import { prisma } from '@/infrastructure/db/prisma';
 import { rateLimit, rateLimits } from '@/infrastructure/rate-limit';
+import { authOptions } from '@/src/infrastructure/auth/auth';
 import { Prisma } from '@prisma/client';
 import { getServerSession } from 'next-auth/next';
 import { NextRequest, NextResponse } from 'next/server';
@@ -123,6 +123,14 @@ export async function POST(req: NextRequest) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         if ((error as any)?.code === 'P2002') {
             return NextResponse.json({ error: 'Mentor profile already exists' }, { status: 409 });
+        }
+        
+        // Handle database connectivity errors gracefully
+        if ((error as { code?: string }).code === 'P1001' || (error as { code?: string }).code === 'P2024') {
+            return NextResponse.json({ 
+                error: "Service temporarily unavailable",
+                retryAfter: 30
+            }, { status: 503, headers: { 'Retry-After': '30' } });
         }
         
         return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

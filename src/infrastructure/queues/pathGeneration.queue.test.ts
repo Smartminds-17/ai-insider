@@ -13,6 +13,12 @@ const testSyllabus: Syllabus = {
   ]
 };
 
+interface PathGenerationJobData {
+  userId: string;
+  pathId: string;
+  syllabus: Syllabus;
+}
+
 describe('BullMQ DLQ Configuration (pathGeneration.queue)', () => {
   let testQueue: Queue | null = null;
   let testWorker: Worker | null = null;
@@ -58,7 +64,7 @@ describe('BullMQ DLQ Configuration (pathGeneration.queue)', () => {
     });
 
     // Create worker that always fails to test retry logic
-    testWorker = new Worker<any, any>(
+    testWorker = new Worker<PathGenerationJobData, void>(
       'test-path-generation',
       async () => {
         throw new Error('Simulated path generation failure');
@@ -77,7 +83,7 @@ describe('BullMQ DLQ Configuration (pathGeneration.queue)', () => {
     });
 
     // Add test job to queue
-    const job = await testQueue.add('generate-path', {
+    await testQueue.add('generate-path', {
       userId: 'test-user-123',
       pathId: 'test-path-123',
       syllabus: testSyllabus,
@@ -110,7 +116,7 @@ describe('BullMQ DLQ Configuration (pathGeneration.queue)', () => {
       }
     });
 
-    testWorker = new Worker<any, any>(
+    testWorker = new Worker<PathGenerationJobData, { success: boolean }>(
       'test-config-validation',
       async () => ({ success: true }),
       {

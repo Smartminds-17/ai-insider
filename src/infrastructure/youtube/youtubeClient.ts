@@ -9,8 +9,13 @@ const searchCache = new Map<string, { data: CandidateVideo[]; timestamp: number 
 const CACHE_TTL = 60 * 60 * 1000; // 1 hour
 const PERSISTENT_CACHE_TTL = 14 * 24 * 60 * 60 * 1000; // 14 days
 
+// Circuit breaker for YouTube API failures - stop making requests for 5 minutes after failures
+let youtubeFailed = false;
+let youtubeFailTime = 0;
+const CIRCUIT_BREAKER_TTL = 5 * 60 * 1000; // 5 minutes
+
 // Parses ISO 8601 durations like "PT14M32S" into seconds.
-function parseIsoDuration(iso: string): number {
+export function parseIsoDuration(iso: string): number {
   const match = iso.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
   if (!match) return 0;
   const [, h, m, s] = match;
@@ -147,6 +152,62 @@ export function clearYouTubeCache() {
   console.log("✅ Manual YouTube cache clear complete");
 }
 
+
+export async function getPlaylistVideos(playlistId: string, apiKey: string): Promise<CandidateVideo[]> {
+  const playlistItemsUrl = new URL(`${YOUTUBE_API_BASE}/playlistItems`);
+  playlistItemsUrl.searchParams.set("part", "contentDetails");
+  playlistItemsUrl.searchParams.set("playlistId", playlistId);
+  playlistItemsUrl.searchParams.set("maxResults", "50");
+  playlistItemsUrl.searchParams.set("key", apiKey);
+
+  const playlistItemsRes = await fetchWithRetry(playlistItemsUrl.toString());
+  if (!playlistItemsRes.ok) {
+    throw new Error(`Failed to fetch playlist items with status ${playlistItemsRes.status}`);
+  }
+
+  const playlistItemsData = await playlistItemsRes.json();
+  const videoIds: string[] = playlistItemsData.items
+    .map((item: { contentDetails: { videoId?: string } }) => item.contentDetails.videoId)
+    .filter(Boolean);
+
+  if (videoIds.length === 0) {
+    return [];
+  }
+
+  const detailsUrl = new URL(`${YOUTUBE_API_BASE}/videos`);
+  detailsUrl.searchParams.set("part", "snippet,statistics,contentDetails");
+  detailsUrl.searchParams.set("id", videoIds.join(","));
+  detailsUrl.searchParams.set("key", apiKey);
+
+  const detailsRes = await fetchWithRetry(detailsUrl.toString());
+  if (!detailsRes.ok) {
+    throw new Error(`YouTube video details failed with status ${detailsRes.status}.`);
+  }
+
+  const detailsData = await detailsRes.json();
+  return detailsData.items.map(
+    (item: {
+      id: string;
+      snippet: {
+        title: string;
+        channelTitle: string;
+        thumbnails: { medium?: { url: string }; default: { url: string } };
+        publishedAt: string;
+      };
+      statistics: { viewCount?: string };
+      contentDetails: { duration: string };
+    }) => ({
+      youtubeVideoId: item.id,
+      title: item.snippet.title,
+      channelTitle: item.snippet.channelTitle,
+      thumbnailUrl: item.snippet.thumbnails.medium?.url ?? item.snippet.thumbnails.default.url,
+      durationSec: parseIsoDuration(item.contentDetails.duration),
+      viewCount: Number(item.statistics.viewCount ?? 0),
+      publishedAt: item.snippet.publishedAt,
+    })
+  );
+}
+
 export async function searchVideosForTopic(
   topic: string,
   maxResults = 12
@@ -156,17 +217,37 @@ export async function searchVideosForTopic(
   );
 
   const searchPromise = (async () => {
-    // Check cache first to avoid redundant API calls
-    const normalizedTopic = topic.trim().toLocaleLowerCase();
-    const cacheKey = `${normalizedTopic}:${maxResults}`;
+    const playlistId = topic.match(/list=([\w-]+)/)?.[1];
+
+    // Check circuit breaker first
+    if (youtubeFailed && Date.now() - youtubeFailTime < CIRCUIT_BREAKER_TTL) {
+      console.log(`⚠️ YouTube circuit breaker open, using cached results for: ${topic}`);
+      const cacheKey = playlistId ? `playlist:${playlistId}` : `${topic.trim().toLocaleLowerCase()}:${maxResults}`;
+      const cached = searchCache.get(cacheKey);
+      if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+        return cached.data;
+      }
+      const persistentCache = await prisma.youTubeTopicCache.findUnique({ where: { topicKey: cacheKey } });
+      if (persistentCache && Date.now() - persistentCache.cachedAt.getTime() < PERSISTENT_CACHE_TTL) {
+        const videos = persistentCache.videos as unknown as CandidateVideo[];
+        searchCache.set(cacheKey, { data: videos, timestamp: Date.now() });
+        return videos;
+      }
+      return [];
+    }
+    
+    if (youtubeFailed && Date.now() - youtubeFailTime >= CIRCUIT_BREAKER_TTL) {
+      console.log("🔄 YouTube circuit breaker reset, attempting API calls again");
+      youtubeFailed = false;
+    }
+
+    const cacheKey = playlistId ? `playlist:${playlistId}` : `${topic.trim().toLocaleLowerCase()}:${maxResults}`;
     const cached = searchCache.get(cacheKey);
     if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
       return cached.data;
     }
 
-    const persistentCache = await prisma.youTubeTopicCache.findUnique({
-      where: { topicKey: cacheKey },
-    });
+    const persistentCache = await prisma.youTubeTopicCache.findUnique({ where: { topicKey: cacheKey } });
     if (persistentCache && Date.now() - persistentCache.cachedAt.getTime() < PERSISTENT_CACHE_TTL) {
       const videos = persistentCache.videos as unknown as CandidateVideo[];
       searchCache.set(cacheKey, { data: videos, timestamp: Date.now() });
@@ -178,97 +259,89 @@ export async function searchVideosForTopic(
       throw new Error("YouTube sourcing is unavailable: YOUTUBE_API_KEY is not configured.");
     }
 
-    // YouTube search and details calls consume provider quota. This limiter only
-    // serializes requests within this process; it is not a daily quota guard.
     try {
-      // Wait for rate limiter with timeout
       await youtubeRateLimiter.acquire();
       
-      const searchUrl = new URL(`${YOUTUBE_API_BASE}/search`);
-      searchUrl.searchParams.set("part", "snippet");
-      searchUrl.searchParams.set("q", `${topic} tutorial`);
-      searchUrl.searchParams.set("type", "video");
-      searchUrl.searchParams.set("maxResults", String(maxResults));
-      searchUrl.searchParams.set("relevanceLanguage", "en");
-      searchUrl.searchParams.set("key", apiKey);
+      let results: CandidateVideo[];
 
-      const searchRes = await fetchWithRetry(searchUrl.toString());
-      
-      if (searchRes.status === 429) {
-        throw new Error("YouTube API rate limit reached while sourcing learning videos.");
+      if (playlistId) {
+        console.log(`Fetching videos for playlist: ${playlistId}`);
+        results = await getPlaylistVideos(playlistId, apiKey);
+      } else {
+        const searchUrl = new URL(`${YOUTUBE_API_BASE}/search`);
+        searchUrl.searchParams.set("part", "snippet");
+        searchUrl.searchParams.set("q", `${topic} tutorial`);
+        searchUrl.searchParams.set("type", "video");
+        searchUrl.searchParams.set("maxResults", String(maxResults));
+        searchUrl.searchParams.set("relevanceLanguage", "en");
+        searchUrl.searchParams.set("key", apiKey);
+
+        const searchRes = await fetchWithRetry(searchUrl.toString());
+        if (searchRes.status === 429) throw new Error("YouTube API rate limit reached.");
+        if (!searchRes.ok) throw new Error(`YouTube search failed with status ${searchRes.status}.`);
+
+        const searchData = await searchRes.json();
+        const videoIds: string[] = searchData.items
+          .map((item: { id: { videoId?: string } }) => item.id.videoId)
+          .filter(Boolean);
+
+        if (videoIds.length === 0) {
+          throw new Error(`No YouTube videos found for topic: ${topic}`);
+        }
+
+        await delay(1000);
+
+        const detailsUrl = new URL(`${YOUTUBE_API_BASE}/videos`);
+        detailsUrl.searchParams.set("part", "snippet,statistics,contentDetails");
+        detailsUrl.searchParams.set("id", videoIds.join(","));
+        detailsUrl.searchParams.set("key", apiKey);
+
+        const detailsRes = await fetchWithRetry(detailsUrl.toString());
+        if (detailsRes.status === 429) throw new Error("YouTube API quota reached on details fetch.");
+        if (!detailsRes.ok) throw new Error(`YouTube video details failed with status ${detailsRes.status}.`);
+
+        const detailsData = await detailsRes.json();
+        results = detailsData.items.map(
+          (item: {
+            id: string;
+            snippet: {
+              title: string;
+              channelTitle: string;
+              thumbnails: { medium?: { url: string }; default: { url: string } };
+              publishedAt: string;
+            };
+            statistics: { viewCount?: string };
+            contentDetails: { duration: string };
+          }) => ({
+            youtubeVideoId: item.id,
+            title: item.snippet.title,
+            channelTitle: item.snippet.channelTitle,
+            thumbnailUrl: item.snippet.thumbnails.medium?.url ?? item.snippet.thumbnails.default.url,
+            durationSec: parseIsoDuration(item.contentDetails.duration),
+            viewCount: Number(item.statistics.viewCount ?? 0),
+            publishedAt: item.snippet.publishedAt,
+          })
+        );
       }
 
-      if (!searchRes.ok) {
-        throw new Error(`YouTube search failed with status ${searchRes.status}.`);
-      }
-
-      const searchData = await searchRes.json();
-      const videoIds: string[] = searchData.items
-        .map((item: { id: { videoId?: string } }) => item.id.videoId)
-        .filter(Boolean);
-
-      if (videoIds.length === 0) {
-        throw new Error(`No YouTube videos found for topic: ${topic}`);
-      }
-
-      // Wait 1s between search and details call to avoid overwhelming the API
-      await delay(1000);
-
-      // Second call needed: search.list doesn't return duration/viewCount, only
-      // videos.list (statistics + contentDetails parts) does.
-      const detailsUrl = new URL(`${YOUTUBE_API_BASE}/videos`);
-      detailsUrl.searchParams.set("part", "snippet,statistics,contentDetails");
-      detailsUrl.searchParams.set("id", videoIds.join(","));
-      detailsUrl.searchParams.set("key", apiKey);
-
-      const detailsRes = await fetchWithRetry(detailsUrl.toString());
-      
-      if (detailsRes.status === 429) {
-        throw new Error("YouTube API quota was reached while loading video details.");
-      }
-
-      if (!detailsRes.ok) {
-        throw new Error(`YouTube video details failed with status ${detailsRes.status}.`);
-      }
-
-      const detailsData = await detailsRes.json();
-      const results = detailsData.items.map(
-        (item: {
-          id: string;
-          snippet: {
-            title: string;
-            channelTitle: string;
-            thumbnails: { medium?: { url: string }; default: { url: string } };
-            publishedAt: string;
-          };
-          statistics: { viewCount?: string };
-          contentDetails: { duration: string };
-        }) => ({
-          youtubeVideoId: item.id,
-          title: item.snippet.title,
-          channelTitle: item.snippet.channelTitle,
-          thumbnailUrl: item.snippet.thumbnails.medium?.url ?? item.snippet.thumbnails.default.url,
-          durationSec: parseIsoDuration(item.contentDetails.duration),
-          viewCount: Number(item.statistics.viewCount ?? 0),
-          publishedAt: item.snippet.publishedAt,
-        })
-      );
-
-      // Cache the successful results
       searchCache.set(cacheKey, { data: results, timestamp: Date.now() });
       await prisma.youTubeTopicCache.upsert({
         where: { topicKey: cacheKey },
         update: { topic, videos: JSON.parse(JSON.stringify(results)), cachedAt: new Date() },
         create: { topicKey: cacheKey, topic, videos: JSON.parse(JSON.stringify(results)) },
       });
-      console.log(`Successfully fetched ${results.length} real videos for topic: ${topic}`);
+      console.log(`Successfully fetched ${results.length} videos for: ${topic}`);
       return results;
 
     } catch (err) {
-      console.warn("YouTube sourcing failed for topic:", topic, err);
+      console.warn("YouTube sourcing failed for:", topic, err);
+      youtubeFailed = true;
+      youtubeFailTime = Date.now();
+      console.log(`⚠️ YouTube circuit breaker triggered - will pause API calls for ${CIRCUIT_BREAKER_TTL/1000/60} minutes`);
       throw err;
     }
   })();
 
   return Promise.race([searchPromise, timeoutPromise]);
 }
+

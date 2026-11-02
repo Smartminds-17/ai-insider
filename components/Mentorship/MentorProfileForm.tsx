@@ -2,12 +2,12 @@
 
 import { Button } from "@/components/ui/button";
 import {
-  Form,
-  FormControl,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
+    Form,
+    FormControl,
+    FormField,
+    FormItem,
+    FormLabel,
+    FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -21,14 +21,15 @@ import * as z from "zod";
 const formSchema = z.object({
   bio: z.string().min(10, "Bio must be at least 10 characters long."),
   expertise: z.string().min(2, "Expertise must be at least 2 characters long."),
-  hourlyRate: z.coerce.number().min(0, "Hourly rate cannot be negative."),
+  hourlyRate: z.coerce.number<number>().min(0, "Hourly rate cannot be negative."),
   availability: z.string().min(2, "Availability must be at least 2 characters long."),
-  maxMentees: z.coerce.number().min(1, "Max mentees must be at least 1."),
+  maxMentees: z.coerce.number<number>().min(1, "Max mentees must be at least 1."),
 });
 
 import { MentorProfile } from '@prisma/client';
 
-type FormValues = z.infer<typeof formSchema>;
+type FormInput = z.input<typeof formSchema>;
+type FormOutput = z.output<typeof formSchema>;
 
 export function MentorProfileForm() {
   const router = useRouter();
@@ -36,8 +37,8 @@ export function MentorProfileForm() {
   const [mentorProfile, setMentorProfile] = useState<MentorProfile | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const form = useForm<FormValues, any, FormValues>({
-    resolver: zodResolver(formSchema) as any,
+  const form = useForm<FormInput, unknown, FormOutput>({
+    resolver: zodResolver(formSchema),
     defaultValues: {
       bio: "",
       expertise: "",
@@ -114,7 +115,7 @@ export function MentorProfileForm() {
     }
   };
 
-  const onSubmit = async (values: z.infer<typeof formSchema>) => {
+  const onSubmit = async (values: FormOutput) => {
     setIsSubmitting(true);
     try {
       const transformedValues = {

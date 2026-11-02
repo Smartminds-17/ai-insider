@@ -15,18 +15,39 @@ export async function assignLearningCommunity(
   // Chat requires a signed-in account; anonymous paths stay private.
   if (!user?.email) return null;
 
-  const community = await tx.conversation.upsert({
+  // First try to find existing community to avoid race conditions with concurrent upserts
+  let community = await tx.conversation.findUnique({
     where: { communityKey: root.key },
-    create: {
-      type: "GROUP",
-      name: `${root.label} learners`,
-      description: `A learning community for ${root.label}.`,
-      communityKey: root.key,
-      topicTags: [root.key],
-    },
-    update: {},
     select: { id: true },
   });
+
+  if (!community) {
+    try {
+      // If not found, create it - if another request already created it, this will throw P2002
+      community = await tx.conversation.create({
+        data: {
+          type: "GROUP",
+          name: `${root.label} learners`,
+          description: `A learning community for ${root.label}.`,
+          communityKey: root.key,
+          topicTags: [root.key],
+        },
+        select: { id: true },
+      });
+    } catch (e) {
+      // If creation failed due to unique constraint violation, another request already created it
+      if ((e as { code?: string }).code === 'P2002') {
+        community = await tx.conversation.findUnique({
+          where: { communityKey: root.key },
+          select: { id: true },
+        });
+      }
+      // If we still don't have a community, rethrow the error - it's unexpected
+      if (!community) {
+        throw e;
+      }
+    }
+  }
 
   const membership = await tx.conversationParticipant.createMany({
     data: [{ conversationId: community.id, userId, role: "MEMBER" }],

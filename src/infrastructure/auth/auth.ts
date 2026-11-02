@@ -25,12 +25,23 @@ export const authOptions: NextAuthOptions = {
     }),
   ] : [],
   session: {
-    strategy: "database",
+    strategy: "jwt",
+  },
+  jwt: {
+    secret: process.env.NEXTAUTH_SECRET,
   },
   callbacks: {
-    async session({ session, user }) {
-      if (session.user) {
-        (session.user as { id: string }).id = user.id;
+    async jwt({ token, user }) {
+      // Add user ID to the JWT token when user first signs in
+      if (user) {
+        token.id = user.id;
+      }
+      return token;
+    },
+    async session({ session, token }) {
+      // Pass the user ID from the JWT token to the session
+      if (session.user && token.id) {
+        (session.user as { id: string }).id = token.id as string;
       }
       return session;
     },
@@ -65,18 +76,27 @@ export const authOptions: NextAuthOptions = {
           const anonUser = await prisma.user.findUnique({ where: { id: anonUserId } });
           if (!anonUser) return; // already migrated (or never existed) — nothing to do
 
-          await prisma.$transaction([
-            prisma.learningPath.updateMany({
-              where: { userId: anonUserId },
-              data: { userId: user.id },
-            }),
-            prisma.progress.updateMany({
-              where: { userId: anonUserId },
-              data: { userId: user.id },
-            }),
-            prisma.user.delete({ where: { id: anonUserId } }),
-          ]);
-          console.log("Successfully migrated anonymous user data to", user.id);
+          try {
+            await prisma.$transaction([
+              prisma.learningPath.updateMany({
+                where: { userId: anonUserId },
+                data: { userId: user.id },
+              }),
+              prisma.progress.updateMany({
+                where: { userId: anonUserId },
+                data: { userId: user.id },
+              }),
+              prisma.user.delete({ where: { id: anonUserId } }),
+            ]);
+            console.log("Successfully migrated anonymous user data to", user.id);
+          } catch (migrationErr) {
+            // If the user was already deleted (P2025), that's fine - we still succeeded in migrating data
+            if ((migrationErr as { code?: string }).code === 'P2025') {
+              console.log("ℹ️ Anonymous user was already merged/deleted, migration complete:", anonUserId);
+            } else {
+              throw migrationErr; // Re-throw other unexpected errors
+            }
+          }
         } catch (err) {
           console.error("Anonymous path migration failed", err);
         } finally {

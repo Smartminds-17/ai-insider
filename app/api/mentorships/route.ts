@@ -1,4 +1,4 @@
-import { authOptions } from '@/infrastructure/auth/auth';
+import { authOptions } from '@/src/infrastructure/auth/auth';
 import { prisma } from '@/src/infrastructure/db/prisma';
 import type { Mentorship } from '@prisma/client';
 import { getServerSession } from 'next-auth/next';
@@ -287,8 +287,8 @@ export async function POST(request: Request) {
         ],
         mode: 'payment',
       automatic_tax: { enabled: true },
-        success_url: `${process.env.NEXT_PUBLIC_URL}/dashboard/mentorships?payment=success`,
-        cancel_url: `${process.env.NEXT_PUBLIC_URL}/dashboard/mentorships?payment=cancelled`,
+        success_url: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard/mentorships?payment=success`,
+        cancel_url: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard/mentorships?payment=cancelled`,
         metadata: {
           mentorId,
           menteeId: currentUser.id,

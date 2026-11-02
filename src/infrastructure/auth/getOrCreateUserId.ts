@@ -1,7 +1,7 @@
 import { authOptions } from "@/infrastructure/auth/auth";
 import { mergeAnonymousUser } from "@/infrastructure/auth/mergeAnonymousUser";
 import { prisma } from "@/infrastructure/db/prisma";
-import { getServerSession } from "next-auth";
+import { getServerSession } from "next-auth/next";
 import { cookies } from "next/headers";
 
 export const COOKIE_NAME = "ai_insider_uid";

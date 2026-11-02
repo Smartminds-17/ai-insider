@@ -117,7 +117,7 @@ export async function POST(req: NextRequest) {
             mentorship_credits_last_refreshed: new Date()
           } : {}),
           // If user downgrades from Guided to a lower tier, set credits to 0
-          ...(!isGuidedExpedition && existingUser?.mentorship_credits_remaining! > 0 ? {
+          ...(!isGuidedExpedition && existingUser && existingUser.mentorship_credits_remaining > 0 ? {
             mentorship_credits_remaining: 0
           } : {})
         },

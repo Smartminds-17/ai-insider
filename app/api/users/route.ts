@@ -1,4 +1,4 @@
-import { authOptions } from '@/infrastructure/auth/auth';
+import { authOptions } from '@/src/infrastructure/auth/auth';
 import { prisma } from '@/src/infrastructure/db/prisma';
 import { getServerSession } from 'next-auth/next';
 import { NextResponse } from 'next/server';

@@ -61,7 +61,7 @@ export async function listGoals(userId: string): Promise<GoalSummary[]> {
   return goals.map((g) => {
     const path = g.LearningPath[0] ?? null; // Match updated Prisma relation name
     const allVideoIds = path
-      ? path.topics.flatMap((t: any) => t.topicVideos.map((tv: any) => tv.videoId)) // Add explicit any to resolve implicit type errors
+      ? path.topics.flatMap((t: TopicRow) => t.topicVideos.map((tv: TopicVideoRow) => tv.videoId))
       : [];
     return {
       id: g.id,
