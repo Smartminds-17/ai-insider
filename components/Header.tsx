@@ -3,7 +3,7 @@
 import { useSession } from "next-auth/react";
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import SignInButton from "./SignInButton";
 import SignOutButton from "./SignOutButton";
 
@@ -16,6 +16,28 @@ interface UserTier {
 export default function Header({ userTier }: { userTier: UserTier }) {
   const { data: session, status } = useSession();
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const headerRef = useRef<HTMLElement>(null);
+
+  // Keep --header-h in sync with the real rendered header. The bar wraps to two
+  // rows on small screens (and its height shifts when the session resolves), so
+  // the sticky player cannot rely on a hard-coded offset.
+  useEffect(() => {
+    const el = headerRef.current;
+    if (!el) return;
+
+    const apply = () => {
+      document.documentElement.style.setProperty(
+        "--header-h",
+        `${Math.round(el.getBoundingClientRect().height)}px`
+      );
+    };
+
+    apply();
+
+    const observer = new ResizeObserver(apply);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
   
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -62,7 +84,7 @@ export default function Header({ userTier }: { userTier: UserTier }) {
   }, [status]);
 
   return (
-    <header className="sticky top-0 z-50 flex min-h-16 flex-wrap items-center justify-between gap-x-6 gap-y-3 border-b border-white/10 bg-[var(--ink)]/95 px-4 py-3 backdrop-blur supports-[backdrop-filter:bg-[var(--ink)]/80] sm:px-6">
+    <header ref={headerRef} className="sticky top-0 z-[var(--z-header)] flex min-h-16 flex-wrap items-center justify-between gap-x-6 gap-y-3 border-b border-[var(--border-subtle)] bg-[var(--ink)]/95 px-4 py-3 backdrop-blur supports-[backdrop-filter:bg-[var(--ink)]/80] sm:px-6">
       <Link href="/" className="font-mono text-xs tracking-widest uppercase text-[var(--route)]">
         AI Insider
       </Link>

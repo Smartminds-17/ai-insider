@@ -152,6 +152,58 @@ export function clearYouTubeCache() {
   console.log("✅ Manual YouTube cache clear complete");
 }
 
+export interface ChannelDetails {
+  channelId: string;
+  handle: string | null;
+  avatarUrl: string | null;
+}
+
+/**
+ * Resolve display metadata for YouTube channels in batches of 50.
+ * `channels.list` costs 1 quota unit per request, so a whole route's creators
+ * typically costs a single unit.
+ */
+export async function fetchChannelDetails(channelIds: string[]): Promise<ChannelDetails[]> {
+  const apiKey = process.env.YOUTUBE_API_KEY;
+  const unique = [...new Set(channelIds.filter(Boolean))];
+  if (!apiKey || unique.length === 0) return [];
+
+  const details: ChannelDetails[] = [];
+
+  for (let i = 0; i < unique.length; i += 50) {
+    const chunk = unique.slice(i, i + 50);
+    const url = new URL(`${YOUTUBE_API_BASE}/channels`);
+    url.searchParams.set("part", "snippet");
+    url.searchParams.set("id", chunk.join(","));
+    url.searchParams.set("key", apiKey);
+
+    try {
+      await youtubeRateLimiter.acquire();
+      const res = await fetchWithRetry(url.toString());
+      if (!res.ok) {
+        console.warn(`YouTube channel details failed with status ${res.status}.`);
+        continue;
+      }
+      const data = await res.json();
+      for (const item of data.items ?? []) {
+        const thumbnails = item.snippet?.thumbnails;
+        details.push({
+          channelId: item.id,
+          handle: item.snippet?.customUrl ?? null,
+          avatarUrl:
+            thumbnails?.medium?.url ??
+            thumbnails?.default?.url ??
+            null,
+        });
+      }
+    } catch (err) {
+      console.warn("Failed to fetch YouTube channel details:", err);
+    }
+  }
+
+  return details;
+}
+
 
 export async function getPlaylistVideos(playlistId: string, apiKey: string): Promise<CandidateVideo[]> {
   const playlistItemsUrl = new URL(`${YOUTUBE_API_BASE}/playlistItems`);
@@ -191,7 +243,7 @@ export async function getPlaylistVideos(playlistId: string, apiKey: string): Pro
       snippet: {
         title: string;
         channelTitle: string;
-        thumbnails: { medium?: { url: string }; default: { url: string } };
+        channelId: string;
         publishedAt: string;
       };
       statistics: { viewCount?: string };
@@ -200,7 +252,9 @@ export async function getPlaylistVideos(playlistId: string, apiKey: string): Pro
       youtubeVideoId: item.id,
       title: item.snippet.title,
       channelTitle: item.snippet.channelTitle,
-      thumbnailUrl: item.snippet.thumbnails.medium?.url ?? item.snippet.thumbnails.default.url,
+      channelId: item.snippet.channelId ?? null,
+      // Use YouTube's native WebP thumbnail (hq720 provides 1280x720 WebP, 30-50% smaller than JPG)
+      thumbnailUrl: `https://i.ytimg.com/vi_webp/${item.id}/hq720.webp`,
       durationSec: parseIsoDuration(item.contentDetails.duration),
       viewCount: Number(item.statistics.viewCount ?? 0),
       publishedAt: item.snippet.publishedAt,
@@ -307,7 +361,7 @@ export async function searchVideosForTopic(
             snippet: {
               title: string;
               channelTitle: string;
-              thumbnails: { medium?: { url: string }; default: { url: string } };
+              channelId: string;
               publishedAt: string;
             };
             statistics: { viewCount?: string };
@@ -316,7 +370,9 @@ export async function searchVideosForTopic(
             youtubeVideoId: item.id,
             title: item.snippet.title,
             channelTitle: item.snippet.channelTitle,
-            thumbnailUrl: item.snippet.thumbnails.medium?.url ?? item.snippet.thumbnails.default.url,
+            channelId: item.snippet.channelId ?? null,
+            // Use YouTube's native WebP thumbnail (hq720 provides 1280x720 WebP, 30-50% smaller than JPG)
+            thumbnailUrl: `https://i.ytimg.com/vi_webp/${item.id}/hq720.webp`,
             durationSec: parseIsoDuration(item.contentDetails.duration),
             viewCount: Number(item.statistics.viewCount ?? 0),
             publishedAt: item.snippet.publishedAt,
@@ -344,4 +400,3 @@ export async function searchVideosForTopic(
 
   return Promise.race([searchPromise, timeoutPromise]);
 }
-

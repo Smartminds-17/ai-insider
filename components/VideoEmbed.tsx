@@ -6,8 +6,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 // Per-browser (local) tracking of the active playing iframe - only ONE video plays per browser page
 let activePlayingIframe: HTMLIFrameElement | null = null;
-// Throttle position updates to every 5s to avoid excessive API calls
-const POSITION_UPDATE_INTERVAL = 5000;
 
 // Format seconds to HH:MM:SS for full time tracking
 function formatTime(seconds: number): string {
@@ -26,9 +24,10 @@ interface VideoEmbedProps {
   title: string;
   videoId?: string; // Optional internal DB video ID to fetch/save progress (only for core path videos)
   durationSec?: number; // Total video duration to show "Resume at X:XX"
+  progressUpdateIntervalMs?: number; // Database-configured progress flush interval
 }
 
-export default function VideoEmbed({ youtubeVideoId, title, videoId, durationSec }: VideoEmbedProps) {
+export default function VideoEmbed({ youtubeVideoId, title, videoId, durationSec, progressUpdateIntervalMs = 5000 }: VideoEmbedProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const positionUpdateRef = useRef<NodeJS.Timeout | null>(null);
   const localTimerRef = useRef<NodeJS.Timeout | null>(null); // Local timer for reliable tracking
@@ -168,9 +167,9 @@ export default function VideoEmbed({ youtubeVideoId, title, videoId, durationSec
                 // Set this iframe as the new active one
                 activePlayingIframe = iframe;
 
-                // Start interval to save position every 5s while playing
+                // Start interval to save position using database-configured interval while playing
                 if (positionUpdateRef.current) clearInterval(positionUpdateRef.current);
-                positionUpdateRef.current = setInterval(saveCurrentPosition, POSITION_UPDATE_INTERVAL);
+                positionUpdateRef.current = setInterval(saveCurrentPosition, progressUpdateIntervalMs);
 
                 // START LOCAL REAL-TIME TIMER for reliable tracking
                 if (localTimerRef.current) clearInterval(localTimerRef.current);

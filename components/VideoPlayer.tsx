@@ -4,6 +4,7 @@ import { formatDuration } from "@/lib/formatDuration";
 import type { YTPlayerInstance } from "@/types/youtube";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+// Shared ActiveVideo interface to avoid circular imports
 export interface ActiveVideo {
   id: string; // our internal Video row id, used for progress tracking
   youtubeVideoId: string;
@@ -15,6 +16,10 @@ export interface ActiveVideo {
 
 interface VideoPlayerProps {
   video: ActiveVideo | null;
+  nextVideo?: { youtubeVideoId: string } | null; // Next video to preload for seamless playback
+  progressFlushIntervalMs?: number;
+  /** Reports playback position at most once per second, for live progress UI. */
+  onProgress?: (update: { videoId: string; positionSec: number; durationSec: number }) => void;
 }
 
 let ytApiLoadPromise: Promise<void> | null = null;
@@ -31,15 +36,15 @@ function loadYouTubeApi(): Promise<void> {
   return ytApiLoadPromise;
 }
 
-// How often we flush accumulated watch-seconds to the server. This is what
-// makes tracking "streaming" rather than a single write at the end.
-const PROGRESS_FLUSH_INTERVAL_MS = 10_000;
+// UI tick for smooth scrubber updates (fixed interval for responsive UI)
 const UI_TICK_MS = 250;
 
-export default function VideoPlayer({ video }: VideoPlayerProps) {
+export default function VideoPlayer({ video, nextVideo, progressFlushIntervalMs = 10000, onProgress }: VideoPlayerProps) {
   const mountRef = useRef<HTMLDivElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<YTPlayerInstance | null>(null);
+  const onProgressRef = useRef(onProgress);
+  const lastReportRef = useRef(0);
   const [ready, setReady] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -49,6 +54,41 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isScrubbing, setIsScrubbing] = useState(false);
   const [scrubValue, setScrubValue] = useState(0);
+  // Keyed by YouTube id so switching lessons clears the state without a reset
+  // effect (which would trigger an extra render pass).
+  const [embedErrorFor, setEmbedErrorFor] = useState<string | null>(null);
+  const [slowLoadFor, setSlowLoadFor] = useState<string | null>(null);
+  const embedError = Boolean(video && embedErrorFor === video.youtubeVideoId);
+  const slowLoad = Boolean(video && slowLoadFor === video.youtubeVideoId);
+
+  // If the embed has not become ready in a reasonable window, surface an
+  // explicit "open on YouTube" escape hatch instead of a silent black box.
+  useEffect(() => {
+    const youTubeId = video?.youtubeVideoId;
+    if (!youTubeId || ready) return;
+    const timeout = setTimeout(() => setSlowLoadFor(youTubeId), 8000);
+    return () => clearTimeout(timeout);
+  }, [video?.youtubeVideoId, ready]);
+
+  // Preload next video in sequence when current video is actively playing
+  useEffect(() => {
+    if (!video || !nextVideo?.youtubeVideoId || !isPlaying) return;
+
+    // Preload the next YouTube video's embed by creating a hidden iframe
+    // This allows seamless playback when the user navigates to the next video
+    const preloadIframe = document.createElement('iframe');
+    preloadIframe.style.display = 'none';
+    preloadIframe.src = `https://www.youtube.com/embed/${nextVideo.youtubeVideoId}`;
+    preloadIframe.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture';
+    document.body.appendChild(preloadIframe);
+
+    // Cleanup preload iframe if component unmounts or video changes
+    return () => {
+      if (document.body.contains(preloadIframe)) {
+        document.body.removeChild(preloadIframe);
+      }
+    };
+  }, [video?.id, nextVideo?.youtubeVideoId, isPlaying]);
 
   // Tracks watch-seconds accumulated since the last flush to the backend.
   const pendingSecondsRef = useRef(0);
@@ -58,6 +98,21 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
   useEffect(() => {
     currentVideoRef.current = video;
   }, [video]);
+  useEffect(() => {
+    onProgressRef.current = onProgress;
+  }, [onProgress]);
+
+  const reportProgress = useCallback((positionSec: number, durationSec: number) => {
+    const current = currentVideoRef.current;
+    if (!current) return;
+    const now = Date.now();
+    lastReportRef.current = now;
+    onProgressRef.current?.({
+      videoId: current.id,
+      positionSec: Math.max(0, positionSec),
+      durationSec: durationSec || current.durationSec,
+    });
+  }, []);
 
   const flushProgress = useCallback(() => {
     const v = currentVideoRef.current;
@@ -81,60 +136,105 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
     }).catch(() => {});
   }, []);
 
-  // (Re)create the player whenever the selected video changes.
+  // Reuse existing player instead of recreating - fixes slow video switching!
+  // The player mounts only after an explicit lesson/Resume click, so it starts
+  // loading immediately instead of waiting for an intersection observer (which
+  // could miss and leave the embed uninitialised behind the "taking too long"
+  // fallback).
   useEffect(() => {
-    if (!video || !mountRef.current) return;
+    if (!video) return;
     let cancelled = false;
-    setReady(false);
-    setIsPlaying(false);
-    setCurrentTime(video.lastPositionSec || 0);
-    setDuration(video.durationSec || 0);
+    
+    // Update state asynchronously to avoid cascading render warnings
+    setTimeout(() => {
+      if (!cancelled) {
+        setCurrentTime(video.lastPositionSec || 0);
+        setDuration(video.durationSec || 0);
+      }
+    }, 0);
 
     loadYouTubeApi().then(() => {
       if (cancelled || !window.YT || !mountRef.current) return;
 
-      playerRef.current?.destroy();
-      new window.YT.Player(mountRef.current, {
-        videoId: video.youtubeVideoId,
-        playerVars: {
-          // Strip YouTube's native chrome — our own control bar replaces all of it.
-          controls: 0,
-          rel: 0, // limit related videos (at end) to the same channel
-          modestbranding: 1, // smaller YouTube logo
-          disablekb: 1, // we handle our own keyboard shortcuts if added later
-          iv_load_policy: 3, // hide video annotations/cards
-          fs: 0, // hide native fullscreen button, we render our own
-          playsinline: 1,
-          origin: typeof window !== "undefined" ? window.location.origin : "",
-        },
-        events: {
-          onReady: (e) => {
-            if (cancelled) return;
-            playerRef.current = e.target;
-            setReady(true);
-            setDuration(e.target.getDuration() || video.durationSec || 0);
-            if (video.lastPositionSec > 5) {
-              e.target.seekTo(video.lastPositionSec, true);
-            }
+      if (!playerRef.current) {
+        // Only create the player ONCE when the component mounts
+        new window.YT.Player(mountRef.current, {
+          videoId: video.youtubeVideoId,
+          playerVars: {
+            // Strip YouTube's native chrome — our own control bar replaces all of it.
+            controls: 0,
+            rel: 0, // limit related videos (at end) to the same channel
+            modestbranding: 1, // smaller YouTube logo
+            disablekb: 1, // we handle our own keyboard shortcuts if added later
+            iv_load_policy: 3, // hide video annotations/cards
+            fs: 0, // hide native fullscreen button, we render our own
+            playsinline: 1,
+            origin: typeof window !== "undefined" ? window.location.origin : "",
           },
-          onStateChange: (e) => {
-            if (cancelled) return;
-            const playing = e.data === window.YT?.PlayerState?.PLAYING;
-            setIsPlaying(!!playing);
-            if (e.data === window.YT?.PlayerState?.ENDED) {
-              flushProgress();
-            }
+          events: {
+            onReady: (e) => {
+              if (cancelled) return;
+              playerRef.current = e.target;
+              setReady(true);
+              // A retry of the same lesson must clear any previous fallback.
+              setEmbedErrorFor(null);
+              setSlowLoadFor(null);
+              const knownDuration = e.target.getDuration() || video.durationSec || 0;
+              setDuration(knownDuration);
+              // Never resume into the final 15 seconds — that lands on the
+              // end screen and looks like the video "didn't play".
+              const resumeAt =
+                video.lastPositionSec > 5 &&
+                (!knownDuration || video.lastPositionSec < knownDuration - 15)
+                  ? video.lastPositionSec
+                  : 0;
+              if (resumeAt > 0) {
+                e.target.seekTo(resumeAt, true);
+              }
+              // Start playback immediately once ready
+              e.target.playVideo();
+            },
+            onError: () => {
+              if (!cancelled) setEmbedErrorFor(video.youtubeVideoId);
+            },
+            onStateChange: (e) => {
+              if (cancelled) return;
+              const playing = e.data === window.YT?.PlayerState?.PLAYING;
+              setIsPlaying(!!playing);
+              if (!playing) {
+                reportProgress(
+                  e.target.getCurrentTime?.() ?? 0,
+                  e.target.getDuration?.() ?? 0
+                );
+              }
+              if (e.data === window.YT?.PlayerState?.ENDED) {
+                flushProgress();
+              }
+            },
           },
-        },
-      });
+        });
+      } else {
+        // Switch to new video instantly with cueVideoById (pre-buffers video) then play.
+        // Same end-guard as onReady: don't seek into the last 15 seconds.
+        const resumeAt =
+          video.lastPositionSec > 5 &&
+          (!video.durationSec || video.lastPositionSec < video.durationSec - 15)
+            ? video.lastPositionSec
+            : 0;
+        playerRef.current.cueVideoById(video.youtubeVideoId, resumeAt);
+        setEmbedErrorFor(null);
+        setSlowLoadFor(null);
+        setReady(true);
+        // Small delay to ensure buffering started before playing
+        setTimeout(() => playerRef.current?.playVideo(), 100);
+      }
     });
 
     return () => {
       cancelled = true;
       flushProgress();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [video?.id]);
+  }, [video?.id, flushProgress, reportProgress]);
 
   // Smooth UI tick (scrubber + clock) and watch-seconds accumulation while playing.
   useEffect(() => {
@@ -150,20 +250,26 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
         pendingSecondsRef.current += (now - lastTickTimeRef.current) / 1000;
       }
       lastTickTimeRef.current = now;
+      const seconds = player.getCurrentTime?.() ?? 0;
       if (!isScrubbing) {
-        setCurrentTime(player.getCurrentTime?.() ?? 0);
+        setCurrentTime(seconds);
+      }
+      // Feed the page's live progress readout, but only once per second so the
+      // roadmap isn't re-rendering on every 250ms UI tick.
+      if (Date.now() - lastReportRef.current >= 1000) {
+        reportProgress(seconds, player.getDuration?.() ?? 0);
       }
     }, UI_TICK_MS);
     return () => clearInterval(interval);
-  }, [ready, isPlaying, isScrubbing]);
+  }, [ready, isPlaying, isScrubbing, reportProgress]);
 
   // Periodic flush to the server so progress is genuinely streamed, not
-  // written only once at the end.
+  // written only once at the end. Uses database-configured interval
   useEffect(() => {
     if (!ready) return;
-    const interval = setInterval(flushProgress, PROGRESS_FLUSH_INTERVAL_MS);
+    const interval = setInterval(flushProgress, progressFlushIntervalMs);
     return () => clearInterval(interval);
-  }, [ready, flushProgress]);
+  }, [ready, flushProgress, progressFlushIntervalMs]);
 
   useEffect(() => {
     const onFsChange = () => setIsFullscreen(document.fullscreenElement === wrapperRef.current);
@@ -173,7 +279,7 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
 
   if (!video) {
     return (
-      <div className="sticky top-0 z-30 -mx-16 px-16 pb-4 pt-4 bg-[var(--ink)]/80 backdrop-blur-xl">
+      <div className="sticky top-[var(--header-h)] z-[var(--z-player)] -mx-5 px-5 pb-4 pt-4 sm:-mx-8 sm:px-8 bg-[var(--ink)]/85 backdrop-blur-xl">
         <div className="max-w-4xl mx-auto">
           <div className="aspect-video w-full rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center">
             <div className="text-center">
@@ -223,6 +329,7 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
     playerRef.current?.seekTo(scrubValueRef.current, true);
     setCurrentTime(scrubValueRef.current);
     setIsScrubbing(false);
+    reportProgress(scrubValueRef.current, duration);
   };
 
   const handleVolume = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -259,7 +366,7 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
   };
 
   return (
-    <div className="sticky top-0 z-30 -mx-16 px-16 pb-4 pt-4 bg-[var(--ink)]/80 backdrop-blur-xl">
+    <div className="sticky top-[var(--header-h)] z-[var(--z-player)] -mx-5 px-5 pb-4 pt-4 sm:-mx-8 sm:px-8 bg-[var(--ink)]/85 backdrop-blur-xl">
       <div className="max-w-4xl mx-auto">
         <div
           ref={wrapperRef}
@@ -267,8 +374,32 @@ export default function VideoPlayer({ video }: VideoPlayerProps) {
         >
           <div ref={mountRef} className="w-full h-full" />
 
+          {/* Fallback when YouTube refuses to embed the lesson (disabled by the
+              uploader, age-gated, or removed). Without this the player just sits
+              on a black rectangle with a console 404. */}
+          {(embedError || (slowLoad && !ready)) && (
+            <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-[var(--ink)]/95 px-6 text-center">
+              <p className="text-sm font-medium text-[var(--text)]">
+                {embedError ? "This lesson can’t play here" : "This lesson is taking too long to load"}
+              </p>
+              <p className="max-w-sm text-xs leading-relaxed text-[var(--text-dim)]">
+                {embedError
+                  ? "YouTube has disabled embedding for this video. Open it on YouTube, or pick another lesson below."
+                  : "YouTube may be blocked or slow on this connection. You can open the lesson directly."}
+              </p>
+              <a
+                href={`https://www.youtube.com/watch?v=${encodeURIComponent(video.youtubeVideoId)}`}
+                target="_blank"
+                rel="noreferrer"
+                className="btn btn--route btn--sm"
+              >
+                Open on YouTube
+              </a>
+            </div>
+          )}
+
           {/* Click-to-play overlay, only shown when player is ready but not yet playing */}
-          {!isPlaying && ready && (
+          {!isPlaying && ready && !embedError && (
             <button
               type="button"
               className="absolute inset-0 w-full h-full flex items-center justify-center bg-black/20"

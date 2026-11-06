@@ -29,13 +29,14 @@ describe('BullMQ DLQ Configuration (pathGeneration.queue)', () => {
   });
 
   afterEach(async () => {
-    // Clean up queues after each test
-    if (testQueue) {
-      await testQueue.drain();
-      await testQueue.close();
-    }
+    // Close the worker first, then wipe the test queue so failed/retried jobs
+    // don't leak between runs.
     if (testWorker) {
       await testWorker.close();
+    }
+    if (testQueue) {
+      await testQueue.obliterate({ force: true }).catch(() => {});
+      await testQueue.close();
     }
   });
 
@@ -63,6 +64,10 @@ describe('BullMQ DLQ Configuration (pathGeneration.queue)', () => {
       }
     });
 
+    // Start from a clean slate: failed/delayed jobs from an earlier run would
+    // otherwise add extra 'failed' events to this assertion.
+    await testQueue.obliterate({ force: true });
+
     // Create worker that always fails to test retry logic
     testWorker = new Worker<PathGenerationJobData, void>(
       'test-path-generation',
@@ -74,30 +79,39 @@ describe('BullMQ DLQ Configuration (pathGeneration.queue)', () => {
       }
     );
 
-    // Listen for failures to track attempt counts
+    // BullMQ emits 'failed' once per attempt, so with attempts=3 we expect
+    // three events (attemptsMade 1, 2, 3) and then the job stays failed (DLQ).
+    let resolveAttempts!: () => void;
+    const allAttempts = new Promise<void>((resolve) => {
+      resolveAttempts = resolve;
+    });
+
     testWorker.on('failed', (job) => {
-      if (job) {
-        failedAttempts.push(job.attemptsMade);
-        totalFailures++;
-      }
+      if (!job) return;
+      failedAttempts.push(job.attemptsMade);
+      totalFailures++;
+      if (job.attemptsMade >= 3) resolveAttempts();
     });
 
     // Add test job to queue
-    await testQueue.add('generate-path', {
+    const job = await testQueue.add('generate-path', {
       userId: 'test-user-123',
       pathId: 'test-path-123',
       syllabus: testSyllabus,
     });
 
-    // Wait for all retries to complete
-    await new Promise<void>((resolve) => {
-      testWorker!.on('drained', () => resolve());
-    });
+    await Promise.race([
+      allAttempts,
+      new Promise<void>((_, reject) =>
+        setTimeout(() => reject(new Error('Timed out waiting for retries')), 15_000),
+      ),
+    ]);
 
-    // Verify the fix: exactly 3 attempts, only 1 final failure (no indefinite retries)
-    expect(totalFailures).toBe(1);
-    expect(failedAttempts).toContain(3);
-    expect(failedAttempts.length).toBe(1);
+    // Verify the fix: exactly 3 attempts, then the job is parked in the DLQ
+    // instead of retrying indefinitely.
+    expect(totalFailures).toBe(3);
+    expect(failedAttempts).toEqual([1, 2, 3]);
+    expect(await job.getState()).toBe('failed');
   });
 
   it('maintains consistent DLQ settings between queue and worker initializations', async () => {

@@ -1,12 +1,18 @@
 "use client";
 
 import type { PathView } from "@/domain/types";
+import { computePathProgress, videoPercent } from "@/domain/progress";
+import { MessageCircle, Play, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import CreatorsRail from "./CreatorsRail";
 import RelatedRail from "./RelatedRail";
 import TopicWaypoint from "./TopicWaypoint";
-import VideoPlayer, { type ActiveVideo } from "./VideoPlayer";
+import type { ActiveVideo } from "./VideoPlayer";
+import VideoPlayer from "./VideoPlayer";
+
+import { useSystemConfig } from "@/hooks/useSystemConfig";
 
 interface PathRoadmapProps {
   pathId: string;
@@ -16,23 +22,69 @@ type PathVideo = PathView["topics"][number]["videos"][number];
 
 export default function PathRoadmap({ pathId }: PathRoadmapProps) {
   const router = useRouter();
+  const config = useSystemConfig();
   const [path, setPath] = useState<PathView | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [expandedTopicIndex, setExpandedTopicIndex] = useState<number | null>(null);
   const [activeVideo, setActiveVideo] = useState<ActiveVideo | null>(null);
+  const [dismissedContinueWatching, setDismissedContinueWatching] = useState(false);
+  const [isContinueWatchingVisible, setIsContinueWatchingVisible] = useState(true);
+  const [livePositions, setLivePositions] = useState<Record<string, number>>({});
+  const lastScrollYRef = useRef(0);
+  const playerAnchorRef = useRef<HTMLDivElement>(null);
+
+  // Live progress from the player: the roadmap percentage moves while the
+  // lesson plays, without refetching the page. High-water mark, so rewinding
+  // never makes the route look less complete.
+  const handleLiveProgress = useCallback(
+    (update: { videoId: string; positionSec: number }) => {
+      setLivePositions((previous) => {
+        const current = previous[update.videoId] ?? 0;
+        if (update.positionSec <= current) return previous;
+        return { ...previous, [update.videoId]: update.positionSec };
+      });
+    },
+    []
+  );
+
+  // Show/hide the continue-watching bar on scroll direction. A ref keeps the
+  // listener stable (no re-render or re-binding on every scroll tick).
+  useEffect(() => {
+    const handleScroll = () => {
+      const currentScrollY = window.scrollY;
+      if (currentScrollY > lastScrollYRef.current && currentScrollY > 100) {
+        setIsContinueWatchingVisible(false);
+      } else {
+        setIsContinueWatchingVisible(true);
+      }
+      lastScrollYRef.current = currentScrollY;
+    };
+
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    return () => window.removeEventListener("scroll", handleScroll);
+  }, []);
+
+  // Find and remove old persistent community floating circle code if present
+  useEffect(() => {
+    // Remove any residual floating circle elements from the DOM
+    const floatingCircle = document.querySelector('[data-community-floating-circle]');
+    if (floatingCircle) {
+      floatingCircle.remove();
+    }
+  }, []);
 
   // GET /api/paths/[id] only ever returns a path owned by the requesting user
   // (anonymous-cookie or signed-in) — see src/application/getPath.ts, which
   // scopes the query by userId. So the player naturally only ever appears
   // for someone who created this path; anyone else gets `notFound` below.
-  const handleSelectVideo = async (video: PathVideo) => {
+  const handleSelectVideo = useCallback(async (video: PathVideo) => {
     // Fetch the latest saved position from the backend before setting as active video
     try {
       const res = await fetch(`/api/progress?videoId=${video.id}`);
       const json = await res.json();
       const latestPosition = json.data?.lastPositionSec ?? video.lastPositionSec;
-      
+
       setActiveVideo({
         id: video.id,
         youtubeVideoId: video.youtubeVideoId,
@@ -53,7 +105,7 @@ export default function PathRoadmap({ pathId }: PathRoadmapProps) {
         lastPositionSec: video.lastPositionSec,
       });
     }
-  };
+  }, []);
 
   const handleToggleTopic = (index: number) => {
     setExpandedTopicIndex((prev) => (prev === index ? null : index));
@@ -84,9 +136,27 @@ export default function PathRoadmap({ pathId }: PathRoadmapProps) {
 
   useEffect(() => {
     if (!path || path.status !== "GENERATING") return;
-    const interval = setInterval(fetchPath, 2000);
+    const interval = setInterval(fetchPath, config.pathGenerationPollIntervalMs);
     return () => clearInterval(interval);
-  }, [path, fetchPath]);
+  }, [path, fetchPath, config.pathGenerationPollIntervalMs]);
+
+  // The player is opt-in: it only appears when the learner picks a lesson or
+  // presses Resume in the bottom continue-watching bar. Landing on the route
+  // overview never auto-opens a video.
+
+  // When a lesson is picked from deep in the syllabus, bring the sticky player
+  // back into view — otherwise playback starts above the fold and looks broken.
+  useEffect(() => {
+    if (!activeVideo?.id) return;
+    const anchor = playerAnchorRef.current;
+    if (!anchor) return;
+
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    anchor.scrollIntoView({
+      behavior: reduceMotion ? "auto" : "smooth",
+      block: "nearest",
+    });
+  }, [activeVideo?.id]);
 
   // If path becomes not found after loading, redirect to /paths
   useEffect(() => {
@@ -137,34 +207,45 @@ export default function PathRoadmap({ pathId }: PathRoadmapProps) {
 
   const resolvedPath = path;
 
-  const totalVideos = path.topics.reduce((sum, t) => sum + t.videos.length, 0);
-  // Progress is the furthest-watched seconds across every video in the path,
-  // divided by their combined duration — not a count of "fully watched"
-  // videos, so partial progress through a long video still moves the bar.
-  const allPathVideos = path.topics.flatMap((t) => t.videos);
-  const totalDurationSec = allPathVideos.reduce((sum, v) => sum + v.durationSec, 0);
-  const watchedTimeSec = allPathVideos.reduce(
-    (sum, v) => sum + Math.min(v.farthestPositionSec, v.durationSec),
-    0
-  );
-  const pct = totalDurationSec > 0 ? Math.round((watchedTimeSec / totalDurationSec) * 100) : 0;
-
-  // Find the most recently-watched video, if any, to power the hero
   const allVideos = path.topics.flatMap((topic) => topic.videos);
+  const totalVideos = allVideos.length;
+  // Shared canonical progress — the history list uses the same function, so
+  // every screen agrees on the percentage. Merge the live position of the
+  // lesson currently playing on top of the fetched progress.
+  const progressVideos = allVideos.map((video) => {
+    const live = livePositions[video.id] ?? 0;
+    return live > video.farthestPositionSec
+      ? { ...video, farthestPositionSec: live }
+      : video;
+  });
+  const { percent: pct } = computePathProgress(progressVideos);
+
+  // Most recently-watched video, by progress-update time (not by position —
+  // a long video watched once must not beat the video watched five minutes ago).
   const lastWatchedVideo = allVideos.reduce((last, video) => {
+    if (!video.lastPositionSec || !video.lastWatchedAt) return last;
     if (!last) return video;
-    if (!video.lastPositionSec) return last;
-    if (!last.lastPositionSec || video.lastPositionSec > last.lastPositionSec) {
-      return video;
-    }
-    return last;
+    return new Date(video.lastWatchedAt).getTime() > new Date(last.lastWatchedAt ?? 0).getTime()
+      ? video
+      : last;
   }, null as PathVideo | null);
 
+  const showContinueBar =
+    path.status === "READY" &&
+    !activeVideo &&
+    !dismissedContinueWatching &&
+    Boolean(lastWatchedVideo && lastWatchedVideo.lastPositionSec > 0);
+
+  const continuePct = lastWatchedVideo ? videoPercent(lastWatchedVideo) : 0;
+
+  // Find the next video in sequence to preload for seamless playback
+  const nextVideo = activeVideo ? allVideos.find(v => v.id !== activeVideo.id && allVideos.indexOf(v) > allVideos.findIndex(v => v.id === activeVideo.id)) : null;
+
   return (
-    <main className="flex-1 px-5 py-10 sm:px-8 sm:py-16">
-      {/* A "continue watching" hero card that picks up the most-recently-viewed
-          video. This is separate from the active video selection, which follows
-          the user's clicks inside the syllabus below. */}
+    <main
+      className="flex-1 px-5 py-10 sm:px-8 sm:py-16"
+      style={showContinueBar ? { paddingBottom: "8rem" } : undefined}
+    >
       {/* Single sticky player for the whole path — stays pinned to the top of the
           viewport while the syllabus scrolls underneath it. Only rendered on this
           path's own page, and this page 404s for anyone who isn't its owner. */}
@@ -202,46 +283,89 @@ export default function PathRoadmap({ pathId }: PathRoadmapProps) {
         </div>
       </div>
 
-      {path.community && (
-        <aside className="surface-card mx-auto mb-8 flex max-w-3xl flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
-          <div className="flex items-start gap-3">
-            <span className="mt-0.5 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[var(--sage)]/10 text-[var(--sage)]" aria-hidden="true">◎</span>
-            <div>
-              <p className="legend-label legend-label--sage mb-1">Your learning community</p>
-              <h2 className="font-medium">{path.community.name}</h2>
-              <p className="mt-1 text-sm text-[var(--text-dim)]">This route has a matching topic community.</p>
-            </div>
-          </div>
-          <Link href="/chat" className="btn btn--sage shrink-0">Open messages <span aria-hidden="true">→</span></Link>
-        </aside>
+      {/* Render sticky player only when a video is selected. The zero-height
+          anchor above it is the scroll target when a lesson is picked. */}
+      {path.status === "READY" && activeVideo && (
+        <div ref={playerAnchorRef} className="scroll-mt-[var(--header-h)]" aria-hidden="true" />
       )}
+      {path.status === "READY" && activeVideo && <VideoPlayer video={activeVideo} progressFlushIntervalMs={config.progressAutoSaveIntervalMs} onProgress={handleLiveProgress} />}
 
-      {/* Render sticky player only when a video is selected */}
-      {path.status === "READY" && activeVideo && <VideoPlayer video={activeVideo} />}
-
-      {/* Resume button card - shows when no active video and user has a last watched video */}
-      {path.status === "READY" && !activeVideo && lastWatchedVideo && (
-        <div className="max-w-3xl mx-auto mb-12">
-          <div className="surface-card p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-            <div>
-              <p className="legend-label legend-label--ink mb-2">Continue watching</p>
-              <h3 className="text-lg font-medium">{lastWatchedVideo.title}</h3>
-              <p className="text-sm text-[var(--text-dim)] mt-1">
-                {lastWatchedVideo.lastPositionSec
-                  ? `Resume at ${Math.round(lastWatchedVideo.lastPositionSec / 60)}m ${Math.round(lastWatchedVideo.lastPositionSec % 60)}s`
-                  : "Start watching"}
-              </p>
+      {/* Continue-watching bar — fixed to the bottom, but only while no player
+          is open. Pressing Resume is the one action on this page that opens
+          the player at the saved position. */}
+      {showContinueBar && lastWatchedVideo && (
+        <div
+          role="region"
+          aria-label="Continue watching"
+          className={`fixed inset-x-0 bottom-0 z-[var(--z-player)] border-t border-[var(--border-subtle)] bg-[var(--surface-1)]/95 backdrop-blur-xl transition-transform duration-[var(--motion-slow)] ease-[var(--ease-out)] ${
+            isContinueWatchingVisible ? "translate-y-0" : "translate-y-full"
+          }`}
+        >
+          <div
+            className="mx-auto flex max-w-3xl items-center gap-3 px-4 pt-3 sm:px-6"
+            style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}
+          >
+            <div className="relative hidden h-12 w-20 shrink-0 overflow-hidden rounded-md border border-white/10 bg-black sm:block">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={lastWatchedVideo.thumbnailUrl}
+                alt=""
+                className="h-full w-full object-cover opacity-80"
+              />
+              <span className="absolute inset-0 flex items-center justify-center">
+                <Play className="h-4 w-4 text-white" fill="currentColor" />
+              </span>
             </div>
+
+            <div className="min-w-0 flex-1">
+              <p className="legend-label legend-label--route mb-1">Continue watching</p>
+              <p className="truncate text-sm text-[var(--text)]">{lastWatchedVideo.title}</p>
+              <div className="mt-2 flex items-center gap-2">
+                <div className="h-1 flex-1 overflow-hidden rounded-full bg-white/10">
+                  <div
+                    className="h-full rounded-full bg-[var(--route)]"
+                    style={{ width: `${continuePct}%` }}
+                  />
+                </div>
+                <span className="shrink-0 font-mono text-[11px] text-[var(--text-dim)]">
+                  {continuePct}%
+                </span>
+              </div>
+            </div>
+
+            {path.community && (
+              <Link
+                href="/chat"
+                className="hidden min-h-11 min-w-11 items-center justify-center rounded-lg text-[var(--text-dim)] transition-colors hover:bg-white/5 hover:text-[var(--text)] sm:flex"
+                title={`${path.community.name} — open community messages`}
+                aria-label={`Open ${path.community.name} community messages`}
+              >
+                <MessageCircle className="h-5 w-5" />
+              </Link>
+            )}
+
             <button
               type="button"
-              onClick={() => handleSelectVideo(lastWatchedVideo)}
-              className="btn btn--sage whitespace-nowrap"
+              onClick={() => void handleSelectVideo(lastWatchedVideo)}
+              className="btn btn--route btn--sm min-h-11 shrink-0"
             >
+              <Play className="h-4 w-4" fill="currentColor" />
               Resume
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setDismissedContinueWatching(true)}
+              className="flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-lg text-[var(--text-dim)] transition-colors hover:bg-white/5 hover:text-[var(--text)]"
+              aria-label="Dismiss continue watching bar"
+            >
+              <X className="h-5 w-5" />
             </button>
           </div>
         </div>
       )}
+
+      {/* Removed old persistent community floating circle - per user request to eliminate intrusive UI */}
 
       <div className="max-w-3xl mx-auto">
         {path.status === "GENERATING" && (
@@ -271,10 +395,12 @@ export default function PathRoadmap({ pathId }: PathRoadmapProps) {
               onToggle={() => handleToggleTopic(i)}
               activeVideoId={activeVideo?.id ?? null}
               onSelectVideo={handleSelectVideo}
+              progressUpdateIntervalMs={config.progressAutoSaveIntervalMs}
             />
           ))}
         </div>
 
+        {path.status === "READY" && <CreatorsRail videos={allVideos} />}
         {path.status === "READY" && <RelatedRail field={path.title} />}
 
         {false && resolvedPath.status === "READY" && (

@@ -1,4 +1,7 @@
-import { pathGenerationWorker } from "@/infrastructure/queues/pathGeneration.queue";
+import {
+  ensurePathGenerationQueue,
+  getPathGenerationWorker,
+} from "@/infrastructure/queues/pathGeneration.queue";
 import type { Job } from "bullmq";
 import { NextRequest, NextResponse } from "next/server";
 import { timingSafeEqual } from "node:crypto";
@@ -18,15 +21,22 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // Only set up worker event listeners if we're using BullMQ (production)
-  if (pathGenerationWorker) {
-    pathGenerationWorker.on("completed", (job: Job) => {
-      console.log(`Job ${job.id} completed successfully`);
-    });
+  // Initialize the queue lazily (it probes Redis first), then attach listeners
+  // once. Repeated calls must not register duplicate listeners.
+  await ensurePathGenerationQueue();
+  const queueWorker = getPathGenerationWorker();
 
-    pathGenerationWorker.on("failed", (job: Job | undefined, error: Error) => {
-      console.error(`Job ${job?.id} failed:`, error);
-    });
+  // Only set up worker event listeners if we're using BullMQ (production)
+  if (queueWorker) {
+    if (queueWorker.listenerCount("completed") === 0) {
+      queueWorker.on("completed", (job: Job) => {
+        console.log(`Job ${job.id} completed successfully`);
+      });
+
+      queueWorker.on("failed", (job: Job | undefined, error: Error) => {
+        console.error(`Job ${job?.id} failed:`, error);
+      });
+    }
 
     return NextResponse.json({ 
       status: "Queue worker running",

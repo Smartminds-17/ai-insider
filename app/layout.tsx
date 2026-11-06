@@ -1,14 +1,16 @@
 import AuthProvider from "@/components/AuthProvider";
 import Header from "@/components/Header";
+import { Toaster } from "@/components/ui/toast";
 import { authOptions } from "@/infrastructure/auth/auth";
 import { cn } from "@/lib/utils";
 import { prisma } from "@/src/infrastructure/db/prisma";
 import type { Metadata } from "next";
 import { getServerSession } from "next-auth/next";
-import { Geist } from "next/font/google";
+import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
-const geist = Geist({subsets:['latin'],variable:'--font-sans'});
+const geistSans = Geist({ subsets: ["latin"], variable: "--font-geist-sans" });
+const geistMono = Geist_Mono({ subsets: ["latin"], variable: "--font-geist-mono" });
 
 export const metadata: Metadata = {
   title: "AI Insider — Learn anything from YouTube, in order",
@@ -55,11 +57,13 @@ export default async function RootLayout({
   }
 
   return (
-    <html lang="en" className={cn("h-full antialiased", "font-sans", geist.variable)}>
+    <html lang="en" className={cn("h-full antialiased", geistSans.variable, geistMono.variable)}>
       <body className="min-h-full flex flex-col">
         <AuthProvider>
-          <Header userTier={userTier} />
-          {children}
+          <Toaster>
+            <Header userTier={userTier} />
+            {children}
+          </Toaster>
         </AuthProvider>
       </body>
     </html>

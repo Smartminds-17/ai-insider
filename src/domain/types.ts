@@ -15,6 +15,8 @@ export interface CandidateVideo {
   youtubeVideoId: string;
   title: string;
   channelTitle: string;
+  /** YouTube channel id, when the source response provides it. */
+  channelId?: string | null;
   thumbnailUrl: string;
   durationSec: number;
   viewCount: number;
@@ -60,12 +62,18 @@ export interface PathView {
       youtubeVideoId: string;
       title: string;
       channelTitle: string;
+      /** Channel metadata for the "creators" surfaces; null until backfilled. */
+      channelId: string | null;
+      channelHandle: string | null;
+      channelAvatarUrl: string | null;
       thumbnailUrl: string;
       durationSec: number;
       watched: boolean;
       watchedSeconds: number;
       lastPositionSec: number;
       farthestPositionSec: number;
+      /** ISO timestamp of the last progress update, used to pick "continue watching". */
+      lastWatchedAt: string | null;
       selected: boolean;
       source: VideoSource;
     }[];
@@ -81,4 +89,18 @@ export interface PathSummary {
   createdAt: string; // ISO date
   totalVideos: number;
   watchedVideos: number;
+  /** Canonical time-based progress, 0–100. See src/domain/progress.ts. */
+  progressPercent: number;
+  /** ISO timestamp of the most recent progress update, if the user started. */
+  lastWatchedAt: string | null;
+  /** YouTube id of the lesson to resume, when a lesson is in progress. */
+  resumeVideoId: string | null;
+  resumeVideoTitle: string | null;
+  resumeThumbnailUrl: string | null;
+  /** Seconds left in the resume lesson, for "12 min left" copy. */
+  resumeRemainingSec: number | null;
+  topicCount: number;
+  totalDurationSec: number;
+  /** First lesson thumbnail, used as the route's cover art. */
+  coverThumbnailUrl: string | null;
 }

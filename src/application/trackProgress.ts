@@ -1,4 +1,5 @@
 import { prisma } from "@/infrastructure/db/prisma";
+import { getSystemConfig } from "./getSystemConfig";
 
 // Update playback position (called every 5-10 seconds while video is playing).
 // There is no manual "mark as watched" toggle — completion is entirely
@@ -9,12 +10,13 @@ export async function updatePlaybackPosition(
   positionSec: number,
   deltaSeconds: number
 ) {
-  // Auto-mark as watched if user is >95% through the video
+  // Auto-mark as watched if user passes database-configured threshold
+  const watchThreshold = await getSystemConfig<number>("video_watch_threshold_pct") ?? 0.95;
   const videoDuration = await prisma.video.findUnique({
     where: { id: videoId },
     select: { durationSec: true }
   });
-  const isWatched = videoDuration?.durationSec && positionSec > videoDuration.durationSec * 0.95;
+  const isWatched = videoDuration?.durationSec && positionSec > videoDuration.durationSec * watchThreshold;
 
   const existing = await prisma.progress.findUnique({
     where: { userId_videoId: { userId, videoId } },
@@ -29,6 +31,8 @@ export async function updatePlaybackPosition(
       lastPositionSec: positionSec,
       farthestPositionSec,
       watchedSeconds: { increment: deltaSeconds },
+      // Drives "continue watching" recency; the column has no @updatedAt.
+      updatedAt: new Date(),
       // Auto-set watched if user is almost finished
       ...(isWatched && { watched: true, watchedAt: new Date() })
     },

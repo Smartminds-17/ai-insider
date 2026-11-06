@@ -206,15 +206,26 @@ model Message {
 }
 
 model MessageReaction {
-  id        String   @id @default(uuid())
-  messageId String
-  userId    String
-  emoji     String
-  createdAt DateTime @default(now())
-  Message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
-  User      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id             String    @id @default(uuid())
+  messageId      String
+  userId         String
+  emoji          String
+  createdAt      DateTime  @default(now())
+  Message        Message   @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  User           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([messageId, userId, emoji])
+}
+
+model SystemConfig {
+  key          String    @id
+  value        Float?
+  stringValue  String?
+  description  String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @default(now())
+
+  @@index([key])
 }
 
 model Progress {
@@ -318,6 +329,9 @@ model Video {
   youtubeVideoId String       @unique
   title          String
   channelTitle   String
+  channelId      String?
+  channelHandle  String?
+  channelAvatarUrl String?
   thumbnailUrl   String
   durationSec    Int
   viewCount      BigInt
@@ -325,6 +339,8 @@ model Video {
   cachedAt       DateTime     @default(now())
   progress       Progress[]
   topicVideos    TopicVideo[]
+
+  @@index([channelId])
 }
 
 model YouTubeTopicCache {

@@ -13,12 +13,19 @@ function toTag(str: string): string {
 export async function GET() {
   try {
     const session = await getServerSession(authOptions);
-    if (!session?.user?.email) {
+    // More robust session check - use id if available, fall back to email
+    const userIdentifier = session?.user?.id || session?.user?.email;
+    if (!userIdentifier) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const currentUser = await prisma.user.findUnique({
-      where: { email: session.user.email },
+    const currentUser = await prisma.user.findFirst({
+      where: { 
+        OR: [
+          { id: userIdentifier },
+          { email: session.user?.email }
+        ]
+      },
       select: { id: true }
     });
 
@@ -36,15 +43,15 @@ export async function GET() {
       include: {
         ConversationParticipant: {
           include: {
-            User: { select: { id: true, name: true, image: true, email: true, isOnline: true, lastActiveAt: true } }
+            User: { select: { id: true, name: true, image: true, email: true, isOnline: true, lastActiveAt: true, emailVerified: true } }
           }
         },
         Message: {
           orderBy: { createdAt: 'desc' },
           take: 1,
           include: {
-            User: { select: { id: true, name: true, image: true } }
-          }
+            User: { select: { id: true, name: true, image: true, emailVerified: true } }
+          },
         },
       }
     });
@@ -53,13 +60,16 @@ export async function GET() {
     const processedConversations = conversations.map(conv => {
       // Rename ConversationParticipant to participants for frontend compatibility
       const { ConversationParticipant, Message, ...rest } = conv;
+      // Filter out unregistered (unverified) users from participants and messages
+      const verifiedParticipants = ConversationParticipant.filter(p => p.User?.emailVerified != null);
+      const verifiedMessages = Message.filter(m => m.User?.emailVerified != null);
       const convWithFrontendKeys = {
         ...rest,
-        participants: ConversationParticipant.map(p => ({
+        participants: verifiedParticipants.map(p => ({
           ...p,
           user: p.User // Map User to user for frontend type compatibility
         })),
-        messages: Message.map(m => ({
+        messages: verifiedMessages.map(m => ({
           ...m,
           sender: m.User
         }))
@@ -70,8 +80,8 @@ export async function GET() {
         const otherUser = convWithFrontendKeys.participants.find(p => p.userId !== currentUser.id)?.user;
         return {
           ...convWithFrontendKeys,
-          _sortKey: otherUser?.isOnline ? 0 : 1, // Online first (0 comes before 1)
-          otherUserOnline: otherUser?.isOnline || false
+          _sortKey: otherUser?.isOnline ? 0 : 1, // Online first (0 comes before 1), safe fallback if otherUser is undefined
+          otherUserOnline: otherUser?.isOnline ?? false // Use nullish coalescing for safer undefined check
         };
       }
       return { ...convWithFrontendKeys, _sortKey: 2, otherUserOnline: false };
@@ -81,7 +91,17 @@ export async function GET() {
       return new Date(b.lastMessageAt || 0).getTime() - new Date(a.lastMessageAt || 0).getTime();
     });
 
-    const visibleConversations = processedConversations.map((conversation) => {
+    // Filter out any direct conversations that have no other registered participants
+    const validConversations = processedConversations.filter(conv => {
+      if (conv.type === 'DIRECT') {
+        // For direct chats, keep only if there's another registered user
+        return conv.participants.some(p => p.userId !== currentUser.id);
+      }
+      // For group chats, keep if there are still other participants
+      return conv.participants.length > 1;
+    });
+
+    const visibleConversations = validConversations.map((conversation) => {
       const {
         _sortKey,
         learningPathId,
@@ -102,12 +122,19 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session?.user?.email) {
+    // More robust session check - use id if available, fall back to email
+    const userIdentifier = session?.user?.id || session?.user?.email;
+    if (!userIdentifier) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const currentUser = await prisma.user.findUnique({
-      where: { email: session.user.email },
+    const currentUser = await prisma.user.findFirst({
+      where: { 
+        OR: [
+          { id: userIdentifier },
+          { email: session.user?.email }
+        ]
+      },
       select: { id: true, name: true }
     });
 
@@ -129,200 +156,54 @@ export async function POST(request: Request) {
     // Create direct chat (1:1)
     if (type === 'DIRECT') {
       if (!Array.isArray(participantIds) || participantIds.length !== 1 || typeof participantIds[0] !== 'string') {
-        return NextResponse.json({ error: 'Direct chat requires exactly one participant' }, { status: 400 });
+        return NextResponse.json({ error: 'Invalid participantIds for direct chat' }, { status: 400 });
       }
-      const targetUserId = participantIds[0];
-      if (targetUserId === currentUser.id) {
-        return NextResponse.json({ error: 'Cannot create a conversation with yourself' }, { status: 400 });
+      
+      // Only allow creating chats with registered users
+      const otherUser = await prisma.user.findUnique({
+        where: { id: participantIds[0] },
+        select: { id: true, emailVerified: true }
+      });
+      
+      if (!otherUser || !otherUser.emailVerified) {
+        return NextResponse.json({ error: 'Can only create chats with registered users' }, { status: 400 });
       }
-      const targetUser = await prisma.user.findUnique({ where: { id: targetUserId }, select: { id: true } });
-      if (!targetUser) return NextResponse.json({ error: 'User not found' }, { status: 404 });
 
-      // Check if conversation already exists between these two users (exactly these two users, no more)
+      // Check if direct conversation already exists
       const existingConversation = await prisma.conversation.findFirst({
         where: {
           type: 'DIRECT',
-          memberCount: 2,
-          AND: [
-            { ConversationParticipant: { every: { userId: { in: [currentUser.id, targetUserId] } } } },
-            { ConversationParticipant: { some: { userId: currentUser.id } } },
-            { ConversationParticipant: { some: { userId: targetUserId } } }
-          ]
-        }
+          ConversationParticipant: {
+            every: {
+              userId: { in: [currentUser.id, otherUser.id] }
+            }
+          }
+        },
+        select: { id: true }
       });
 
       if (existingConversation) {
-        return NextResponse.json(existingConversation);
+        return NextResponse.json({ id: existingConversation.id }, { status: 200 });
       }
 
       // Create new direct conversation
       const newConversation = await prisma.conversation.create({
         data: {
           type: 'DIRECT',
-          memberCount: 2,
           ConversationParticipant: {
             create: [
-              { userId: currentUser.id, role: 'MEMBER' },
-              { userId: targetUserId, role: 'MEMBER' }
+              { userId: currentUser.id },
+              { userId: otherUser.id }
             ]
           }
         },
-        include: {
-          ConversationParticipant: {
-            include: { User: { select: { id: true, name: true, image: true, email: true } } }
-          }
-        }
+        select: { id: true }
       });
 
-      // Map to frontend expected keys
-      const { ConversationParticipant, ...rest } = newConversation;
-      const mappedConversation = {
-        ...rest,
-        participants: ConversationParticipant.map(p => ({
-          ...p,
-          user: p.User
-        }))
-      };
-      console.log(`✅ Created new DIRECT conversation: ${newConversation.id} between ${currentUser.id} and ${participantIds[0]}`);
-      return NextResponse.json(mappedConversation);
-    }
-    
-    // Create group chat (can be auto-created for learning paths)
-    if (type === 'GROUP') {
-      if (participantIds !== undefined && (!Array.isArray(participantIds) || participantIds.some((id) => typeof id !== 'string'))) {
-        return NextResponse.json({ error: 'Participant IDs must be strings' }, { status: 400 });
-      }
-      if (Array.isArray(participantIds) && participantIds.length > 99) {
-        return NextResponse.json({ error: 'A group can have at most 100 participants' }, { status: 400 });
-      }
-      const allParticipants = [...new Set([...(Array.isArray(participantIds) ? participantIds as string[] : []), currentUser.id])];
-      if (allParticipants.length !== 1) {
-        return NextResponse.json({ error: 'Add members through an invitation they accept' }, { status: 400 });
-      }
-      if (learningPathId !== undefined && (typeof learningPathId !== 'string' || !learningPathId)) {
-        return NextResponse.json({ error: 'Invalid learning path ID' }, { status: 400 });
-      }
-      if (typeof name === 'string' && name.trim().length > 80) {
-        return NextResponse.json({ error: 'Group name must be 80 characters or fewer' }, { status: 400 });
-      }
-      if (learningPathId) {
-        const ownedPath = await prisma.learningPath.findFirst({
-          where: { id: learningPathId, userId: currentUser.id },
-          select: { id: true },
-        });
-        if (!ownedPath) return NextResponse.json({ error: 'Learning path not found' }, { status: 404 });
-      }
-      if (allParticipants.length > 1) {
-        const validUsers = await prisma.user.count({ where: { id: { in: allParticipants } } });
-        if (validUsers !== allParticipants.length) {
-          return NextResponse.json({ error: 'One or more participants were not found' }, { status: 404 });
-        }
-      }
-
-      // If it's a learning path group, check if it already exists
-      if (learningPathId) {
-        const existingGroup = await prisma.conversation.findFirst({
-          where: {
-            type: 'GROUP',
-            learningPathId: learningPathId
-          }
-        });
-
-        if (existingGroup) {
-          // Add the user to the existing group if not already a member
-          const isMember = await prisma.conversationParticipant.findFirst({
-            where: {
-              conversationId: existingGroup.id,
-              userId: currentUser.id
-            }
-          });
-
-          if (!isMember) {
-            await prisma.$transaction(async (tx) => {
-              const membership = await tx.conversationParticipant.createMany({
-                data: [{ conversationId: existingGroup.id, userId: currentUser.id, role: 'MEMBER' }],
-                skipDuplicates: true,
-              });
-              if (membership.count) {
-                await tx.conversation.update({ where: { id: existingGroup.id }, data: { memberCount: { increment: 1 } } });
-                await tx.message.create({
-                  data: {
-                    conversationId: existingGroup.id,
-                    senderId: currentUser.id,
-                    content: `${currentUser.name || 'A new user'} joined the group`,
-                    messageType: 'SYSTEM'
-                  }
-                });
-              }
-            });
-          }
-
-          return NextResponse.json(existingGroup);
-        }
-      }
-
-      // Create new group conversation
-      const groupName = typeof name === 'string' && name.trim()
-        ? name.trim()
-        : (learningPathId ? 'Learning Community' : 'New Group');
-
-      // Generate topicTags from learning path if available
-      let topicTags: string[] = [];
-      if (learningPathId) {
-        const learningPath = await prisma.learningPath.findUnique({
-          where: { id: learningPathId },
-          select: { title: true }
-        });
-        if (learningPath?.title) {
-          topicTags = [toTag(learningPath.title)];
-        }
-      }
-
-      const newGroup = await prisma.conversation.create({
-        data: {
-          type: 'GROUP',
-          name: groupName,
-          learningPathId: learningPathId || null,
-          topicTags: topicTags,
-          ConversationParticipant: {
-            create: allParticipants.map((userId: string) => ({
-              userId,
-              role: userId === currentUser.id ? 'ADMIN' : 'MEMBER'
-            }))
-          }
-        },
-        include: {
-          ConversationParticipant: {
-            include: { User: { select: { id: true, name: true, image: true, email: true } } }
-          }
-        }
-      });
-
-  // Map to frontend expected keys
-      const { ConversationParticipant: groupParticipants, ...groupRest } = newGroup;
-      const mappedGroup = {
-        ...groupRest,
-        participants: groupParticipants.map(p => ({
-          ...p,
-          user: p.User
-        }))
-      };
-      console.log(`✅ Created new GROUP conversation: ${newGroup.id} "${groupName}" with ${allParticipants.length} participants`);
-
-      // Add welcome system message
-      await prisma.message.create({
-        data: {
-          conversationId: newGroup.id,
-          senderId: currentUser.id,
-          content: `Welcome to ${groupName}! This is the start of your community chat.`,
-          messageType: 'SYSTEM'
-        }
-      });
-
-      return NextResponse.json(mappedGroup);
+      return NextResponse.json({ id: newConversation.id }, { status: 201 });
     }
 
-    return NextResponse.json({ error: 'Invalid conversation type' }, { status: 400 });
+    return NextResponse.json({ error: 'Unsupported conversation type' }, { status: 400 });
   } catch (error) {
     console.error('Error creating conversation:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

@@ -19,10 +19,11 @@ export async function GET() {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
-    // Fetch all users except the current user, with their mentor profile data
+    // Fetch all registered (email verified) users except the current user
     const users = await prisma.user.findMany({
       where: {
-        id: { not: currentUser.id } // Exclude current user from the list
+        id: { not: currentUser.id }, // Exclude current user from the list
+        emailVerified: { not: null } // Only include registered users with verified emails
       },
       select: {
         id: true,

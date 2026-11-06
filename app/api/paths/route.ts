@@ -104,10 +104,19 @@ export async function POST(req: NextRequest) {
   }
   const body = await req.json().catch(() => null);
   const prompt = typeof body?.prompt === "string" ? body.prompt.trim() : "";
+  const playlistId = typeof body?.playlistId === "string" ? body.playlistId.trim() : undefined;
 
   if (!prompt) {
     return NextResponse.json(
       { data: null, meta: {}, error: { code: "INVALID_INPUT", message: "prompt is required" } },
+      { status: 400 }
+    );
+  }
+
+  // Validate playlist ID format if provided
+  if (playlistId && !/^PL[a-zA-Z0-9_-]+$/.test(playlistId)) {
+    return NextResponse.json(
+      { data: null, meta: {}, error: { code: "INVALID_PLAYLIST_ID", message: "Invalid YouTube playlist ID format" } },
       { status: 400 }
     );
   }
@@ -185,7 +194,7 @@ export async function POST(req: NextRequest) {
     }
 
     // 4. Use production-grade queue to handle path generation
-     const { jobId } = await queuePathGeneration(userId, prompt);
+     const { jobId } = await queuePathGeneration(userId, prompt, playlistId);
      
      // Return immediately to the user with their job ID
      // The frontend will poll for updates on this path

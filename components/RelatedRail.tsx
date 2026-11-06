@@ -1,14 +1,19 @@
 "use client";
 
 import type { RankedVideo } from "@/domain/types";
+import { useSystemConfig } from "@/hooks/useSystemConfig";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import VideoEmbed from "./VideoEmbed";
 
 interface RelatedRailProps {
   field: string;
+  onCreatePathFromTopic?: (topic: string) => void;
 }
 
-export default function RelatedRail({ field }: RelatedRailProps) {
+export default function RelatedRail({ field, onCreatePathFromTopic }: RelatedRailProps) {
+  const router = useRouter();
+  const config = useSystemConfig();
   const [videos, setVideos] = useState<RankedVideo[]>([]);
   const [activeVideo, setActiveVideo] = useState<string | null>(null);
   const [loadedField, setLoadedField] = useState<string | null>(null);
@@ -47,7 +52,7 @@ export default function RelatedRail({ field }: RelatedRailProps) {
           <div className="mb-6">
             {videos.filter(v => v.youtubeVideoId === activeVideo).map((v) => (
               <div key={v.youtubeVideoId} className="bg-[var(--ink-2)] border border-white/10 rounded-lg p-3">
-                <VideoEmbed youtubeVideoId={v.youtubeVideoId} title={v.title} durationSec={v.durationSec} />
+                <VideoEmbed youtubeVideoId={v.youtubeVideoId} title={v.title} durationSec={v.durationSec} progressUpdateIntervalMs={config.progressAutoSaveIntervalMs} />
                 <p className="mt-3 text-sm font-medium">{v.title}</p>
                 <button 
                   onClick={() => setActiveVideo(null)}
@@ -63,7 +68,12 @@ export default function RelatedRail({ field }: RelatedRailProps) {
           {videos.map((v) => (
             <button
               key={v.youtubeVideoId}
-              onClick={() => setActiveVideo(v.youtubeVideoId)}
+              onClick={() => {
+                // Extract the main topic from the video title to use as prompt
+                const topic = v.title.split(/[:\-|]/)[0].trim();
+                // Navigate to home page with the topic as search param to populate PromptForm
+                router.push(`/?prompt=${encodeURIComponent(`Learn ${topic}`)}`);
+              }}
               className="group text-left"
             >
               <div className="aspect-video rounded-md overflow-hidden bg-[var(--ink-2)] mb-2 relative">

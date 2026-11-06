@@ -1,6 +1,6 @@
 import type { PathView, VideoSource } from "@/domain/types";
-import { ANONYMOUS_IDENTITY_TTL_SECONDS } from "@/infrastructure/auth/getOrCreateUserId";
 import { prisma } from "@/infrastructure/db/prisma";
+import { getSystemConfig } from "./getSystemConfig";
 
 // Narrow shapes for the query result below, keyed to the fields we actually
 // read. Kept local (rather than relying on Prisma's generated payload types)
@@ -10,6 +10,9 @@ interface VideoRow {
   youtubeVideoId: string;
   title: string;
   channelTitle: string;
+  channelId: string | null;
+  channelHandle: string | null;
+  channelAvatarUrl: string | null;
   thumbnailUrl: string;
   durationSec: number;
 }
@@ -32,6 +35,7 @@ interface ProgressRow {
   watchedSeconds: number;
   lastPositionSec: number;
   farthestPositionSec: number;
+  updatedAt: Date;
 }
 
 export async function getPath(pathId: string, userId: string): Promise<PathView | null> {
@@ -42,6 +46,10 @@ export async function getPath(pathId: string, userId: string): Promise<PathView 
   });
   const isAnonymous = !user?.email;
 
+  // Get anonymous identity TTL from database config (fallback to 45 days)
+  const anonymousTtlDays = await getSystemConfig<number>("anonymous_identity_ttl_days") ?? 45;
+  const anonymousTtlMs = anonymousTtlDays * 24 * 60 * 60 * 1000;
+
   const path = await prisma.learningPath.findFirst({
     where: { 
       id: pathId, 
@@ -49,7 +57,7 @@ export async function getPath(pathId: string, userId: string): Promise<PathView 
       // Keep anonymous paths visible for the lifetime of their identity.
       ...(isAnonymous && {
         createdAt: {
-          gte: new Date(Date.now() - ANONYMOUS_IDENTITY_TTL_SECONDS * 1000)
+          gte: new Date(Date.now() - anonymousTtlMs)
         }
       })
     },
@@ -93,12 +101,16 @@ export async function getPath(pathId: string, userId: string): Promise<PathView 
         youtubeVideoId: tv.video.youtubeVideoId,
         title: tv.video.title,
         channelTitle: tv.video.channelTitle,
+        channelId: tv.video.channelId ?? null,
+        channelHandle: tv.video.channelHandle ?? null,
+        channelAvatarUrl: tv.video.channelAvatarUrl ?? null,
         thumbnailUrl: tv.video.thumbnailUrl,
         durationSec: tv.video.durationSec,
         watched: watchedSet.has(tv.video.id),
         watchedSeconds: progressByVideoId.get(tv.video.id)?.watchedSeconds ?? 0,
         lastPositionSec: progressByVideoId.get(tv.video.id)?.lastPositionSec ?? 0,
         farthestPositionSec: progressByVideoId.get(tv.video.id)?.farthestPositionSec ?? 0,
+        lastWatchedAt: progressByVideoId.get(tv.video.id)?.updatedAt?.toISOString() ?? null,
         selected: tv.selected,
         source: tv.source as VideoSource,
       })),

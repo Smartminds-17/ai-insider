@@ -3,6 +3,7 @@
 import type { PathView } from "@/domain/types";
 
 import { formatDuration } from "@/lib/formatDuration";
+import ChannelLink from "./ChannelLink";
 
 interface TopicWaypointProps {
   topic: PathView["topics"][number];
@@ -11,6 +12,7 @@ interface TopicWaypointProps {
   onToggle: () => void;
   activeVideoId: string | null;
   onSelectVideo: (video: PathView["topics"][number]["videos"][number]) => void;
+  progressUpdateIntervalMs?: number;
 }
 
 export default function TopicWaypoint({
@@ -20,6 +22,7 @@ export default function TopicWaypoint({
   onToggle,
   activeVideoId,
   onSelectVideo,
+  progressUpdateIntervalMs = 5000,
 }: TopicWaypointProps) {
   const watchedCount = topic.videos.filter((v) => v.watched).length;
   const complete = topic.videos.length > 0 && watchedCount === topic.videos.length;
@@ -31,7 +34,7 @@ export default function TopicWaypoint({
   return (
     <div className="relative pl-14">
 
-      {/* Trail line + waypoint marker */}
+      {/* Trail line + waypoint marker - aligned with updated styling */}
       {!isLast && (
         <div
           className="absolute left-[19px] top-10 bottom-[-8px] w-px"
@@ -40,7 +43,7 @@ export default function TopicWaypoint({
       )}
 
       <div
-        className="absolute left-2.5 top-1 w-6 h-6 rounded-full border-2 flex items-center justify-center font-mono text-[10px]"
+        className="absolute left-2.5 top-1 w-6 h-6 rounded-full border-2 flex items-center justify-center font-mono text-[10px] transition-all duration-300"
         style={{
           borderColor: complete ? "var(--route)" : "var(--route-dim)",
           background: complete ? "var(--route)" : "var(--ink)",
@@ -65,15 +68,24 @@ export default function TopicWaypoint({
         
         {/* Show thumbnails of first few videos when collapsed */}
         {!isExpanded && topic.videos.length > 0 && (
-          <div className="mt-3 flex gap-2 overflow-hidden">
+          <div className="mt-3 flex gap-2 overflow-hidden items-center">
             {topic.videos.slice(0, 4).map((video) => (
               <div key={video.id} className="w-24 h-16 rounded-md overflow-hidden bg-[var(--ink)] shrink-0 relative">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={video.thumbnailUrl}
-                  alt={video.title}
-                  className="w-full h-full object-cover"
-                />
+        <img
+          src={video.thumbnailUrl}
+          alt={video.title}
+          className="w-full h-full object-cover"
+          loading="lazy" // Native lazy loading for offscreen thumbnails
+          // Fallback to standard JPG thumbnail if WebP fails to load
+          onError={(e) => {
+            const target = e.target as HTMLImageElement;
+            if (target.src.includes('/vi_webp/')) {
+              // Convert WebP URL to standard JPG URL as fallback
+              target.src = target.src.replace('/vi_webp/', '/vi/').replace('.webp', '.jpg');
+            }
+          }}
+        />
                 {video.watched && (
                   <div className="absolute inset-0 bg-[var(--route)]/60 flex items-center justify-center">
                     <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -84,14 +96,15 @@ export default function TopicWaypoint({
               </div>
             ))}
             {topic.videos.length > 4 && (
-              <div className="w-24 h-16 rounded-md bg-[var(--ink-2)] flex items-center justify-center shrink-0 text-xs text-[var(--text-dim)] font-mono">
-                +{topic.videos.length - 4} more
-              </div>
-            )}
+                <div className="w-24 h-16 rounded-md bg-[var(--ink-2)] flex items-center justify-center shrink-0 text-xs text-[var(--text-dim)] font-mono">
+                  +{topic.videos.length - 4} more
+                </div>
+              )}
           </div>
         )}
       </button>
 
+      {/* Expanded video list - restored original UI with thumbnails */}
       {isExpanded && (
         <div className="pb-8 space-y-2">
           {topic.videos.map((video) => {
@@ -128,26 +141,37 @@ export default function TopicWaypoint({
                   <div className="min-w-0">
                     <p className="text-sm font-medium truncate">{video.title}</p>
                     <p className="text-xs text-[var(--text-dim)] mt-0.5">
-                      {video.channelTitle} · {formatDuration(video.durationSec)}
+                      {formatDuration(video.durationSec)}
                       {video.lastPositionSec > 0 && !video.watched && (
                         <> · resume at {formatDuration(video.lastPositionSec)}</>
                       )}
                     </p>
                   </div>
                 </button>
-                {video.watched && (
-                  <div className="flex items-center gap-1.5 shrink-0 pr-1" title="Watched">
-                    <svg
-                      className="w-[18px] h-[18px] text-[var(--route)]"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                    </svg>
-                    <span className="text-xs font-mono text-[var(--text-dim)] hidden sm:inline">Watched</span>
-                  </div>
-                )}
+
+                <div className="flex shrink-0 items-center gap-2 pr-1">
+                  <ChannelLink
+                    channelTitle={video.channelTitle}
+                    channelId={video.channelId}
+                    channelHandle={video.channelHandle}
+                    channelAvatarUrl={video.channelAvatarUrl}
+                    size={24}
+                    className="max-w-40"
+                  />
+                  {video.watched && (
+                    <div className="flex items-center gap-1.5" title="Watched">
+                      <svg
+                        className="w-[18px] h-[18px] text-[var(--route)]"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                      </svg>
+                      <span className="text-xs font-mono text-[var(--text-dim)] hidden sm:inline">Watched</span>
+                    </div>
+                  )}
+                </div>
               </div>
             );
           })}

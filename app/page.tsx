@@ -1,11 +1,14 @@
 "use client";
 
 import PromptForm from "@/components/PromptForm";
+import type { PathSummary } from "@/domain/types";
 import { useSession } from "next-auth/react";
-import { useEffect, useState } from "react";
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useState } from "react";
 
 interface PathsResponse {
-  data: unknown[];
+  data: PathSummary[];
   meta: {
     monthlyUsage: number;
     monthlyLimit: number;
@@ -17,7 +20,11 @@ interface PathsResponse {
   
   export default function Home() {
   const { data: session } = useSession();
+  const searchParams = useSearchParams();
+  const initialPrompt = searchParams.get('prompt') || "";
   const isLoggedIn = !!session?.user;
+  const [paths, setPaths] = useState<PathSummary[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [displayData, setDisplayData] = useState({
     monthlyUsage: 0,
     monthlyLimit: 3,
@@ -25,11 +32,12 @@ interface PathsResponse {
     lifetimeTotalPaths: 0
   });
 
-  useEffect(() => {
+  const loadPathData = useCallback(() => {
     // Fetch all data from API - we'll use what we need based on login status
     fetch("/api/paths")
       .then(res => res.json() as Promise<PathsResponse>)
       .then(json => {
+        if (json.data) setPaths(json.data);
         if (json.meta) {
           setDisplayData({
             monthlyUsage: json.meta.monthlyUsage,
@@ -39,8 +47,37 @@ interface PathsResponse {
           });
         }
       })
-      .catch(err => console.error("Failed to load usage data:", err));
+      .catch(err => console.error("Failed to load usage data:", err))
+      .finally(() => setIsLoading(false));
   }, []);
+
+  useEffect(() => {
+    loadPathData();
+
+    // Revalidate when the tab regains focus so a route created in another tab
+    // (or progress made in the player) is reflected without a manual refresh.
+    const refresh = () => {
+      if (!document.hidden) loadPathData();
+    };
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [loadPathData]);
+
+  // Home is always the marketing entry point. Resuming a route lives in
+  // /paths (per-route Continue) and in the route page's bottom bar, so the
+  // homepage never swaps itself for a player/resume card.
+
+  if (isLoading) {
+    return (
+      <main className="relative flex-1 overflow-hidden px-5 py-12 sm:px-8 sm:py-20">
+        {/* The page is intentionally blank while loading to prevent a flicker. */}
+      </main>
+    );
+  }
 
   return (
     <main className="relative flex-1 overflow-hidden px-5 py-12 sm:px-8 sm:py-20">
@@ -66,38 +103,46 @@ interface PathsResponse {
               Upgrade plan
             </a>
           )}
+          {isLoggedIn && paths.length > 0 && (
+            <Link
+              href="/paths"
+              className="text-xs text-[var(--text-dim)] transition-colors hover:text-[var(--text)]"
+            >
+              Your routes →
+            </Link>
+          )}
         </div>
 
-        <div className="mx-auto max-w-4xl text-center">
-          <h1 className="font-display mb-6 text-4xl font-medium leading-[1.04] tracking-tight sm:text-6xl lg:text-7xl">
-            YouTube has the course.
-            <br />
-            You just couldn&apos;t{" "}
-            <span className="text-[var(--route)]">find the trail.</span>
-          </h1>
+          <div className="mx-auto max-w-4xl text-center">
+            <h1 className="font-display mb-6 text-4xl font-medium leading-[1.04] tracking-tight sm:text-6xl lg:text-7xl">
+              YouTube has the course.
+              <br />
+              You just couldn&apos;t{" "}
+              <span className="text-[var(--route)]">find the trail.</span>
+            </h1>
 
-          <p className="mx-auto mb-10 max-w-2xl text-base leading-relaxed text-[var(--text-dim)] sm:text-lg">
-            Turn a learning goal into a clear sequence of videos. Follow your progress one lesson at a time.
-          </p>
+            <p className="mx-auto mb-10 max-w-2xl text-base leading-relaxed text-[var(--text-dim)] sm:text-lg">
+              Turn a learning goal into a clear sequence of videos. Follow your progress one lesson at a time.
+            </p>
 
-          <PromptForm />
-        </div>
-
-        <section aria-label="How AI Insider works" className="mx-auto mt-14 grid max-w-4xl gap-3 border-t border-white/10 pt-6 sm:mt-20 sm:grid-cols-3 sm:gap-6 sm:pt-8">
-          {[
-            { number: "01", title: "Name your goal", copy: "Describe what you want to learn." },
-            { number: "02", title: "Get a learning route", copy: "Videos are arranged into a step-by-step path." },
-            { number: "03", title: "Keep moving", copy: "Track progress as you work through each lesson." },
-          ].map((step) => (
-            <div key={step.number} className="flex gap-3 sm:block">
-              <span className="legend-label legend-label--route pt-1 sm:block sm:pb-3">{step.number}</span>
-              <div>
-                <h2 className="mb-1 text-sm font-medium text-[var(--text)]">{step.title}</h2>
-                <p className="text-sm leading-relaxed text-[var(--text-dim)]">{step.copy}</p>
+            <PromptForm initialPrompt={initialPrompt} />
+          </div>
+        
+          <section aria-label="How AI Insider works" className="mx-auto mt-14 grid max-w-4xl gap-3 border-t border-white/10 pt-6 sm:mt-20 sm:grid-cols-3 sm:gap-6 sm:pt-8">
+            {[
+              { number: "01", title: "Name your goal", copy: "Describe what you want to learn." },
+              { number: "02", title: "Get a learning route", copy: "Videos are arranged into a step-by-step path." },
+              { number: "03", title: "Keep moving", copy: "Track progress as you work through each lesson." },
+            ].map((step) => (
+              <div key={step.number} className="flex gap-3 sm:block">
+                <span className="legend-label legend-label--route pt-1 sm:block sm:pb-3">{step.number}</span>
+                <div>
+                  <h2 className="mb-1 text-sm font-medium text-[var(--text)]">{step.title}</h2>
+                  <p className="text-sm leading-relaxed text-[var(--text-dim)]">{step.copy}</p>
+                </div>
               </div>
-            </div>
-          ))}
-        </section>
+            ))}
+          </section>
 
         {/* Design-only: Pricing teaser section (hidden per request, uncomment to restore)
         <section className="mt-20">
