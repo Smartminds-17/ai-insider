@@ -204,6 +204,73 @@ export async function fetchChannelDetails(channelIds: string[]): Promise<Channel
   return details;
 }
 
+export interface ChannelPlaylist {
+  id: string;
+  title: string;
+  description: string | null;
+  channelTitle: string;
+  itemCount: number;
+  thumbnailUrl: string | null;
+  publishedAt: string | null;
+}
+
+/**
+ * List the public playlists a channel has curated. One quota unit per channel
+ * (`playlists.list`), which is why callers probe only the channels already
+ * present on the route instead of running a `search.list` (100 units).
+ */
+export async function fetchChannelPlaylists(
+  channelId: string,
+  maxResults = 25
+): Promise<ChannelPlaylist[]> {
+  const apiKey = process.env.YOUTUBE_API_KEY;
+  if (!apiKey || !channelId) return [];
+
+  const url = new URL(`${YOUTUBE_API_BASE}/playlists`);
+  url.searchParams.set("part", "snippet,contentDetails");
+  url.searchParams.set("channelId", channelId);
+  url.searchParams.set("maxResults", String(Math.min(50, Math.max(1, maxResults))));
+  url.searchParams.set("key", apiKey);
+
+  try {
+    await youtubeRateLimiter.acquire();
+    const res = await fetchWithRetry(url.toString());
+    if (!res.ok) {
+      console.warn(`YouTube playlists for ${channelId} failed with status ${res.status}.`);
+      return [];
+    }
+
+    const data = await res.json();
+    return (data.items ?? []).map(
+      (item: {
+        id: string;
+        snippet: {
+          title: string;
+          description?: string;
+          channelTitle: string;
+          publishedAt?: string;
+          thumbnails?: { medium?: { url?: string }; default?: { url?: string } };
+        };
+        contentDetails?: { itemCount?: number };
+      }) => ({
+        id: item.id,
+        title: item.snippet.title,
+        description: item.snippet.description ?? null,
+        channelTitle: item.snippet.channelTitle,
+        itemCount: Number(item.contentDetails?.itemCount ?? 0),
+        thumbnailUrl:
+          item.snippet.thumbnails?.medium?.url ??
+          item.snippet.thumbnails?.default?.url ??
+          null,
+        publishedAt: item.snippet.publishedAt ?? null,
+      })
+    );
+  } catch (err) {
+    console.warn(`Failed to fetch playlists for channel ${channelId}:`, err);
+    return [];
+  }
+}
+
 
 export async function getPlaylistVideos(playlistId: string, apiKey: string): Promise<CandidateVideo[]> {
   const playlistItemsUrl = new URL(`${YOUTUBE_API_BASE}/playlistItems`);

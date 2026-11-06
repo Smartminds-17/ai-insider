@@ -261,12 +261,19 @@ model Topic {
   title           String
   order           Int
   selectedVideoId String?
+  // AI-suggested playlist for this waypoint, resolved at generation time.
+  playlistId           String?
+  playlistTitle        String?
+  playlistChannelTitle String?
+  playlistThumbnailUrl String?
+  playlistItemCount    Int?
   LearningPath    LearningPath @relation(fields: [learningPathId], references: [id], onDelete: Cascade)
   topicVideos     TopicVideo[]
 
   @@unique([learningPathId, order])
   @@index([learningPathId, order])
   @@index([selectedVideoId])
+  @@index([playlistId])
 }
 
 model TopicVideo {

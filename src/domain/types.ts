@@ -32,6 +32,15 @@ export type VideoSource = "YOUTUBE" | "VIMEO" | "OTHER";
 export type GoalStatus = "GENERATING" | "READY" | "FAILED";
 export type PathStatus = "GENERATING" | "READY" | "FAILED";
 
+/** A YouTube playlist suggested for a single waypoint. */
+export interface TopicPlaylist {
+  id: string;
+  title: string;
+  channelTitle: string;
+  thumbnailUrl: string | null;
+  itemCount: number | null;
+}
+
 export interface GoalSummary {
   id: string;
   title: string;
@@ -57,6 +66,8 @@ export interface PathView {
     title: string;
     order: number;
     selectedVideoId: string | null;
+    /** Curated playlist the AI picked for this waypoint, when a good match exists. */
+    playlist: TopicPlaylist | null;
     videos: {
       id: string;
       youtubeVideoId: string;

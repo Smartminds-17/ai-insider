@@ -27,6 +27,11 @@ interface TopicRow {
   title: string;
   order: number;
   selectedVideoId: string | null;
+  playlistId: string | null;
+  playlistTitle: string | null;
+  playlistChannelTitle: string | null;
+  playlistThumbnailUrl: string | null;
+  playlistItemCount: number | null;
   topicVideos: TopicVideoRow[];
 }
 interface ProgressRow {
@@ -96,6 +101,15 @@ export async function getPath(pathId: string, userId: string): Promise<PathView 
       title: t.title,
       order: t.order,
       selectedVideoId: t.selectedVideoId,
+      playlist: t.playlistId
+        ? {
+            id: t.playlistId,
+            title: t.playlistTitle ?? "Suggested playlist",
+            channelTitle: t.playlistChannelTitle ?? "",
+            thumbnailUrl: t.playlistThumbnailUrl ?? null,
+            itemCount: t.playlistItemCount ?? null,
+          }
+        : null,
       videos: t.topicVideos.map((tv) => ({
         id: tv.video.id,
         youtubeVideoId: tv.video.youtubeVideoId,

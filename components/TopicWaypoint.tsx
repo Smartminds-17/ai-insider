@@ -1,9 +1,12 @@
 "use client";
 
+import { ListVideo } from "lucide-react";
+
 import type { PathView } from "@/domain/types";
 
 import { formatDuration } from "@/lib/formatDuration";
 import ChannelLink from "./ChannelLink";
+import TopicPlaylist from "./TopicPlaylist";
 
 interface TopicWaypointProps {
   topic: PathView["topics"][number];
@@ -61,9 +64,20 @@ export default function TopicWaypoint({
           <h3 className="font-display text-lg group-hover:text-[var(--route)] transition">
             {topic.title}
           </h3>
-          <span className="font-mono text-xs text-[var(--text-dim)] shrink-0">
-            {watchedCount}/{topic.videos.length}
-          </span>
+          <div className="flex shrink-0 items-center gap-2">
+            {topic.playlist && (
+              <span
+                className="hidden items-center gap-1 rounded-full border border-white/10 px-2 py-0.5 font-mono text-[10px] text-[var(--text-dim)] sm:inline-flex"
+                title="This waypoint has a suggested playlist"
+              >
+                <ListVideo aria-hidden="true" className="h-3 w-3" />
+                playlist
+              </span>
+            )}
+            <span className="font-mono text-xs text-[var(--text-dim)]">
+              {watchedCount}/{topic.videos.length}
+            </span>
+          </div>
         </div>
         
         {/* Show thumbnails of first few videos when collapsed */}
@@ -175,6 +189,12 @@ export default function TopicWaypoint({
               </div>
             );
           })}
+
+          {topic.playlist && (
+            <div className="pt-3">
+              <TopicPlaylist playlist={topic.playlist} />
+            </div>
+          )}
         </div>
       )}
       {!isExpanded && <div className="pb-6" />}

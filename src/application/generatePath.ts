@@ -5,6 +5,7 @@ import { generateSyllabus } from "@/infrastructure/llm/syllabusGenerator";
 import { queuePathGeneration } from "@/infrastructure/queues/pathGeneration.queue";
 import { rankVideos } from "@/infrastructure/youtube/rankVideos";
 import { getPlaylistVideos, searchVideosForTopic, fetchChannelDetails } from "@/infrastructure/youtube/youtubeClient";
+import { suggestPlaylistForTopic } from "@/infrastructure/youtube/suggestPlaylist";
 import { Video } from "@prisma/client";
 
 // Upper bound only: rankVideos() keeps a variable number of videos per topic
@@ -179,6 +180,28 @@ export async function processLearningPathTopics(pathId: string, syllabus: Syllab
                 })
             )
           );
+        }
+
+        // Pick a curated playlist for this waypoint from the channels already
+        // teaching on it. Probe at most 3 channels (3 quota units, cached per
+        // process); a weak match is skipped rather than shown.
+        try {
+          const playlist = await suggestPlaylistForTopic(topic.title, channelIds);
+          if (playlist) {
+            await prisma.topic.update({
+              where: { id: createdTopic.id },
+              data: {
+                playlistId: playlist.id,
+                playlistTitle: playlist.title,
+                playlistChannelTitle: playlist.channelTitle,
+                playlistThumbnailUrl: playlist.thumbnailUrl,
+                playlistItemCount: playlist.itemCount,
+              },
+            });
+            console.log(`Suggested playlist for "${topic.title}": ${playlist.title}`);
+          }
+        } catch (error) {
+          console.warn(`Playlist suggestion skipped for "${topic.title}":`, error);
         }
 
         // Process topic-video associations sequentially to maintain order
